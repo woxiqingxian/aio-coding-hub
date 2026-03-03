@@ -863,7 +863,7 @@ LIMIT ?6
                 continue;
             };
 
-            let multiplier = if cost_multiplier.is_finite() && cost_multiplier > 0.0 {
+            let multiplier = if cost_multiplier.is_finite() && cost_multiplier >= 0.0 {
                 cost_multiplier
             } else {
                 1.0

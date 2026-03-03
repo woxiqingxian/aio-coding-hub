@@ -365,7 +365,7 @@ fn insert_batch_once(
                             .query_row(params![final_provider_id], |row| row.get::<_, f64>(0))
                             .optional()
                             .unwrap_or(None)
-                            .filter(|v| v.is_finite() && *v > 0.0)
+                            .filter(|v| v.is_finite() && *v >= 0.0)
                             .unwrap_or(1.0);
                         cache.put_cost_multiplier(final_provider_id, value, now_unix);
                         value

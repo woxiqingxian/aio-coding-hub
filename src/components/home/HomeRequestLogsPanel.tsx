@@ -105,7 +105,7 @@ const RequestLogCard = memo(function RequestLogCard({
 
   const costMultiplier = log.cost_multiplier;
   const showCostMultiplier =
-    Number.isFinite(costMultiplier) && costMultiplier > 0 && Math.abs(costMultiplier - 1) > 0.0001;
+    Number.isFinite(costMultiplier) && costMultiplier >= 0 && Math.abs(costMultiplier - 1) > 0.0001;
   const rawCostUsdText = formatUsdRaw(log.cost_usd);
 
   const cacheWrite = (() => {

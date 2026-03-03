@@ -107,7 +107,7 @@ export function RequestLogDetailDialog({
                     成本 {formatUsdRaw(selectedLog.cost_usd)}
                     {(() => {
                       const m = selectedLog.cost_multiplier;
-                      const show = Number.isFinite(m) && m > 0 && Math.abs(m - 1) > 0.0001;
+                      const show = Number.isFinite(m) && m >= 0 && Math.abs(m - 1) > 0.0001;
                       return show ? (
                         <span className="ml-1 text-slate-500 dark:text-slate-400">
                           (x{m.toFixed(2)})
