@@ -217,8 +217,8 @@ describe("components/cli-manager/tabs/CodexTab", () => {
 
     expect(persistCodexConfig).toHaveBeenCalledWith({
       model: "gpt-5.4",
-      model_context_window: 1000000,
-      model_auto_compact_token_limit: 900000,
+      model_context_window: null,
+      model_auto_compact_token_limit: null,
     });
   });
 });
