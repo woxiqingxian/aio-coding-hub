@@ -1,4 +1,4 @@
-/// Shared SQL WHERE-clause builders for usage analytics queries.
+//! Shared SQL WHERE-clause builders for usage analytics queries.
 
 pub(super) type SqlValues = Vec<rusqlite::types::Value>;
 
