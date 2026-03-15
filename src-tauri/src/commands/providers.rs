@@ -42,6 +42,48 @@ pub(crate) struct ProviderUpsertInput {
     pub note: Option<String>,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+struct ProviderRuntimeResetDecision {
+    clear_session_bindings: bool,
+}
+
+fn submitted_api_key_changed(
+    previous_api_key: Option<&str>,
+    submitted_api_key: Option<&str>,
+) -> bool {
+    let Some(submitted) = submitted_api_key
+        .map(str::trim)
+        .filter(|raw| !raw.is_empty())
+    else {
+        return false;
+    };
+
+    previous_api_key
+        .map(str::trim)
+        .filter(|raw| !raw.is_empty())
+        != Some(submitted)
+}
+
+fn provider_runtime_reset_decision(
+    previous: Option<&providers::ProviderSummary>,
+    previous_api_key: Option<&str>,
+    next: &providers::ProviderSummary,
+    submitted_api_key: Option<&str>,
+) -> ProviderRuntimeResetDecision {
+    let Some(previous) = previous else {
+        return ProviderRuntimeResetDecision::default();
+    };
+
+    let sensitive_config_changed = previous.base_urls != next.base_urls
+        || previous.base_url_mode != next.base_url_mode
+        || previous.auth_mode != next.auth_mode
+        || submitted_api_key_changed(previous_api_key, submitted_api_key);
+
+    ProviderRuntimeResetDecision {
+        clear_session_bindings: sensitive_config_changed,
+    }
+}
+
 #[tauri::command]
 #[specta::specta]
 pub(crate) async fn providers_list(
@@ -62,6 +104,7 @@ pub(crate) async fn providers_list(
 pub(crate) async fn provider_upsert(
     app: tauri::AppHandle,
     db_state: tauri::State<'_, DbInitState>,
+    gateway_state: tauri::State<'_, GatewayState>,
     input: ProviderUpsertInput,
 ) -> Result<providers::ProviderSummary, String> {
     let ProviderUpsertInput {
@@ -90,9 +133,22 @@ pub(crate) async fn provider_upsert(
     let is_create = provider_id.is_none();
     let name_for_log = name.clone();
     let cli_key_for_log = cli_key.clone();
+    let submitted_api_key = api_key.clone();
     let db = ensure_db_ready(app, db_state.inner()).await?;
     let result = blocking::run("provider_upsert", move || {
-        providers::upsert(
+        let previous = match provider_id {
+            Some(id) => {
+                let conn = db.open_connection()?;
+                Some(providers::get_by_id(&conn, id)?)
+            }
+            None => None,
+        };
+        let previous_api_key = match provider_id {
+            Some(id) => Some(providers::get_api_key_plaintext(&db, id)?),
+            None => None,
+        };
+
+        let saved = providers::upsert(
             &db,
             providers::ProviderUpsertParams {
                 provider_id,
@@ -116,12 +172,21 @@ pub(crate) async fn provider_upsert(
                 tags,
                 note,
             },
-        )
+        )?;
+
+        let decision = provider_runtime_reset_decision(
+            previous.as_ref(),
+            previous_api_key.as_deref(),
+            &saved,
+            submitted_api_key.as_deref(),
+        );
+
+        Ok::<_, crate::shared::error::AppError>((saved, decision))
     })
     .await
     .map_err(Into::into);
 
-    if let Ok(ref provider) = result {
+    if let Ok((ref provider, decision)) = result {
         if is_create {
             tracing::info!(
                 provider_id = provider.id,
@@ -137,9 +202,22 @@ pub(crate) async fn provider_upsert(
                 "provider updated"
             );
         }
+
+        if decision.clear_session_bindings {
+            let cleared_sessions = {
+                let manager = gateway_state.0.lock_or_recover();
+                manager.clear_cli_session_bindings(&provider.cli_key)
+            };
+            tracing::info!(
+                provider_id = provider.id,
+                cli_key = %provider.cli_key,
+                cleared_sessions,
+                "provider runtime bindings cleared after sensitive update"
+            );
+        }
     }
 
-    result
+    result.map(|(provider, _)| provider)
 }
 
 #[tauri::command]
@@ -1073,6 +1151,123 @@ mod tests {
         assert_eq!(
             normalize_oauth_short_window_label("codex", Some("custom")).as_deref(),
             Some("custom")
+        );
+    }
+
+    #[test]
+    fn provider_runtime_reset_decision_ignores_create_and_non_sensitive_edits() {
+        let next = providers::ProviderSummary {
+            id: 1,
+            cli_key: "claude".to_string(),
+            name: "Provider A".to_string(),
+            base_urls: vec!["https://api.example.com".to_string()],
+            base_url_mode: providers::ProviderBaseUrlMode::Order,
+            claude_models: Default::default(),
+            enabled: true,
+            priority: 1,
+            cost_multiplier: 1.0,
+            limit_5h_usd: None,
+            limit_daily_usd: None,
+            daily_reset_mode: providers::DailyResetMode::Fixed,
+            daily_reset_time: "00:00:00".to_string(),
+            limit_weekly_usd: None,
+            limit_monthly_usd: None,
+            limit_total_usd: None,
+            tags: vec![],
+            note: String::new(),
+            created_at: 1,
+            updated_at: 1,
+            auth_mode: "api_key".to_string(),
+            oauth_provider_type: None,
+            oauth_email: None,
+            oauth_expires_at: None,
+            oauth_last_error: None,
+        };
+
+        assert_eq!(
+            provider_runtime_reset_decision(None, None, &next, None),
+            ProviderRuntimeResetDecision::default()
+        );
+
+        let mut previous = next.clone();
+        previous.name = "Old Name".to_string();
+        previous.note = "old".to_string();
+        previous.updated_at = 0;
+
+        assert_eq!(
+            provider_runtime_reset_decision(
+                Some(&previous),
+                Some("sk-existing"),
+                &next,
+                Some("   ")
+            ),
+            ProviderRuntimeResetDecision::default()
+        );
+
+        assert_eq!(
+            provider_runtime_reset_decision(
+                Some(&previous),
+                Some("sk-existing"),
+                &next,
+                Some("sk-existing")
+            ),
+            ProviderRuntimeResetDecision::default()
+        );
+    }
+
+    #[test]
+    fn provider_runtime_reset_decision_detects_sensitive_claude_changes() {
+        let previous = providers::ProviderSummary {
+            id: 1,
+            cli_key: "claude".to_string(),
+            name: "Provider A".to_string(),
+            base_urls: vec!["https://api.old.example.com".to_string()],
+            base_url_mode: providers::ProviderBaseUrlMode::Order,
+            claude_models: Default::default(),
+            enabled: true,
+            priority: 1,
+            cost_multiplier: 1.0,
+            limit_5h_usd: None,
+            limit_daily_usd: None,
+            daily_reset_mode: providers::DailyResetMode::Fixed,
+            daily_reset_time: "00:00:00".to_string(),
+            limit_weekly_usd: None,
+            limit_monthly_usd: None,
+            limit_total_usd: None,
+            tags: vec![],
+            note: String::new(),
+            created_at: 1,
+            updated_at: 1,
+            auth_mode: "api_key".to_string(),
+            oauth_provider_type: None,
+            oauth_email: None,
+            oauth_expires_at: None,
+            oauth_last_error: None,
+        };
+
+        let mut next = previous.clone();
+        next.base_urls = vec!["https://api.new.example.com".to_string()];
+
+        assert_eq!(
+            provider_runtime_reset_decision(Some(&previous), Some("sk-old"), &next, None),
+            ProviderRuntimeResetDecision {
+                clear_session_bindings: true,
+            }
+        );
+
+        let mut next_non_claude = previous.clone();
+        next_non_claude.cli_key = "codex".to_string();
+
+        assert_eq!(
+            provider_runtime_reset_decision(
+                Some(&next_non_claude),
+                Some("sk-old"),
+                &next_non_claude,
+                Some("sk-new")
+            ),
+            ProviderRuntimeResetDecision {
+                clear_session_bindings: true,
+            }
         );
     }
 }

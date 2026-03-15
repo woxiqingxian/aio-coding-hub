@@ -487,6 +487,64 @@ describe("pages/providers/ProvidersView", () => {
     );
   });
 
+  it("filters providers by name and restores the list after clearing search", async () => {
+    const providers = [
+      {
+        id: 1,
+        cli_key: "claude",
+        name: "Alpha Relay",
+        enabled: true,
+        base_urls: ["https://a"],
+        base_url_mode: "order",
+        cost_multiplier: 1,
+        claude_models: {},
+        tags: ["prod"],
+      },
+      {
+        id: 2,
+        cli_key: "claude",
+        name: "Beta Gateway",
+        enabled: true,
+        base_urls: ["https://b"],
+        base_url_mode: "ping",
+        cost_multiplier: 1,
+        claude_models: {},
+        tags: ["prod"],
+      },
+    ] as any[];
+
+    vi.mocked(useProvidersListQuery).mockReturnValue({ data: providers, isFetching: false } as any);
+    vi.mocked(useGatewayCircuitStatusQuery).mockReturnValue({
+      data: [],
+      isFetching: false,
+      refetch: vi.fn(),
+    } as any);
+    vi.mocked(useProviderSetEnabledMutation).mockReturnValue({ mutateAsync: vi.fn() } as any);
+    vi.mocked(useProviderDeleteMutation).mockReturnValue({ mutateAsync: vi.fn() } as any);
+    vi.mocked(useProvidersReorderMutation).mockReturnValue({ mutateAsync: vi.fn() } as any);
+    vi.mocked(useGatewayCircuitResetProviderMutation).mockReturnValue({
+      mutateAsync: vi.fn(),
+    } as any);
+    vi.mocked(useGatewayCircuitResetCliMutation).mockReturnValue({ mutateAsync: vi.fn() } as any);
+
+    renderWithQuery(<ProvidersView activeCli="claude" setActiveCli={vi.fn()} />);
+
+    expect(screen.getByText("共 2 / 2 条")).toBeInTheDocument();
+
+    const searchInput = screen.getByRole("textbox", { name: "搜索供应商名称" });
+    fireEvent.change(searchInput, { target: { value: "beta" } });
+
+    expect(screen.getByText("Beta Gateway")).toBeInTheDocument();
+    expect(screen.queryByText("Alpha Relay")).not.toBeInTheDocument();
+    expect(screen.getByText("共 1 / 2 条")).toBeInTheDocument();
+
+    fireEvent.change(searchInput, { target: { value: "" } });
+
+    expect(screen.getByText("Alpha Relay")).toBeInTheDocument();
+    expect(screen.getByText("Beta Gateway")).toBeInTheDocument();
+    expect(screen.getByText("共 2 / 2 条")).toBeInTheDocument();
+  });
+
   it("opens validate dialog and closes it when switching activeCli", async () => {
     vi.mocked(toast).mockClear();
     vi.mocked(logToConsole).mockClear();

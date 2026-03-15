@@ -1,5 +1,6 @@
 // Usage: Rendered by ProvidersPage when `view === "providers"`.
 
+import { Search } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { useQueryClient } from "@tanstack/react-query";
@@ -34,6 +35,7 @@ import {
 import { Button } from "../../ui/Button";
 import { Dialog } from "../../ui/Dialog";
 import { EmptyState } from "../../ui/EmptyState";
+import { Input } from "../../ui/Input";
 import { Spinner } from "../../ui/Spinner";
 import { ProviderEditorDialog } from "./ProviderEditorDialog";
 import { SortableProviderCard } from "./SortableProviderCard";
@@ -122,6 +124,7 @@ export function ProvidersView({ activeCli, setActiveCli }: ProvidersViewProps) {
   const [validateProvider, setValidateProvider] = useState<ProviderSummary | null>(null);
 
   const [selectedTags, setSelectedTags] = useState<Set<string>>(new Set());
+  const [providerSearch, setProviderSearch] = useState("");
 
   const tagCounts = useMemo(() => {
     const counts = new Map<string, number>();
@@ -134,13 +137,22 @@ export function ProvidersView({ activeCli, setActiveCli }: ProvidersViewProps) {
   }, [providers]);
 
   const filteredProviders = useMemo(() => {
-    if (selectedTags.size === 0) return providers;
-    return providers.filter((p) => (p.tags ?? []).some((tag) => selectedTags.has(tag)));
-  }, [providers, selectedTags]);
+    const normalizedSearch = providerSearch.trim().toLowerCase();
+
+    return providers.filter((provider) => {
+      const matchesTags =
+        selectedTags.size === 0 || (provider.tags ?? []).some((tag) => selectedTags.has(tag));
+      if (!matchesTags) return false;
+
+      if (!normalizedSearch) return true;
+      return provider.name.toLowerCase().includes(normalizedSearch);
+    });
+  }, [providerSearch, providers, selectedTags]);
 
   // Reset selected tags when switching CLI or when tags no longer exist
   useEffect(() => {
     setSelectedTags(new Set());
+    setProviderSearch("");
   }, [activeCli]);
 
   useEffect(() => {
@@ -545,6 +557,22 @@ export function ProvidersView({ activeCli, setActiveCli }: ProvidersViewProps) {
           </div>
         </div>
 
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <div className="relative w-full sm:max-w-sm">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+            <Input
+              value={providerSearch}
+              onChange={(e) => setProviderSearch(e.currentTarget.value)}
+              placeholder="搜索当前 CLI 下的供应商名称"
+              className="pl-9"
+              aria-label="搜索供应商名称"
+            />
+          </div>
+          <span className="text-xs text-slate-500 dark:text-slate-400">
+            共 {filteredProviders.length} / {providers.length} 条
+          </span>
+        </div>
+
         <div className="lg:min-h-0 lg:flex-1 lg:overflow-auto lg:pr-1">
           {providersLoading ? (
             <div className="flex items-center gap-2 text-sm text-slate-600 dark:text-slate-400">
@@ -556,7 +584,11 @@ export function ProvidersView({ activeCli, setActiveCli }: ProvidersViewProps) {
           ) : filteredProviders.length === 0 ? (
             <EmptyState
               title="无匹配的 Provider"
-              description="当前标签筛选无结果，请调整筛选条件。"
+              description={
+                selectedTags.size > 0 || providerSearch.trim()
+                  ? "当前名称搜索或标签筛选无结果，请调整筛选条件。"
+                  : "当前列表无可展示的 Provider。"
+              }
             />
           ) : (
             <DndContext

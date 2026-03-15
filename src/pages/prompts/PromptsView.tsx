@@ -39,6 +39,7 @@ function promptFileHint(cliKey: CliKey) {
 
 function previewContent(content: string) {
   const normalized = content.replace(/\s+/g, " ").trim();
+  if (!normalized) return "空内容";
   if (normalized.length <= 120) return normalized;
   return `${normalized.slice(0, 120)}…`;
 }
@@ -327,7 +328,7 @@ export function PromptsView({ workspaceId, cliKey, isActiveWorkspace = true }: P
             <Button
               onClick={() => void save()}
               variant="primary"
-              disabled={saving || !name.trim() || !content.trim()}
+              disabled={saving || !name.trim()}
               className={cn(saving ? "opacity-80" : "")}
             >
               {saving ? "保存中…" : "保存"}

@@ -57,9 +57,16 @@ describe("pages/prompts/PromptsView", () => {
     const createDialog = within(screen.getByRole("dialog"));
     const [nameInput, contentTextarea] = createDialog.getAllByRole("textbox");
     fireEvent.change(nameInput, { target: { value: "P2" } });
-    fireEvent.change(contentTextarea, { target: { value: "Hello" } });
+    fireEvent.change(contentTextarea, { target: { value: "" } });
     fireEvent.click(createDialog.getByRole("button", { name: "保存" }));
-    await waitFor(() => expect(upsertMutation.mutateAsync).toHaveBeenCalled());
+    await waitFor(() =>
+      expect(upsertMutation.mutateAsync).toHaveBeenCalledWith({
+        promptId: null,
+        name: "P2",
+        content: "",
+        enabled: false,
+      })
+    );
 
     fireEvent.click(screen.getByTitle("编辑"));
     const editDialog = within(screen.getByRole("dialog"));

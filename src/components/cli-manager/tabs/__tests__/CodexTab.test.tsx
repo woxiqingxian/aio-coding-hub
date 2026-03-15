@@ -27,6 +27,7 @@ function createCodexConfig(overrides: Partial<any> = {}) {
     model_reasoning_effort: "medium",
     plan_mode_reasoning_effort: null,
     web_search: "cached",
+    personality: null,
     model_context_window: null,
     model_auto_compact_token_limit: null,
     service_tier: null,
@@ -38,6 +39,7 @@ function createCodexConfig(overrides: Partial<any> = {}) {
     features_remote_compaction: false,
     features_fast_mode: false,
     features_remote_models: false,
+    features_responses_websockets_v2: false,
     features_multi_agent: false,
     ...overrides,
   };
@@ -102,15 +104,30 @@ describe("components/cli-manager/tabs/CodexTab", () => {
       service_tier: "fast",
     });
 
-    // Toggle a normal feature switch.
-    const remoteModelsItem = screen.getByText("remote_models").parentElement?.parentElement;
-    expect(remoteModelsItem).toBeTruthy();
-    fireEvent.click(within(remoteModelsItem as HTMLElement).getByRole("switch"));
-    expect(persistCodexConfig).toHaveBeenCalledWith({ features_remote_models: true });
+    const websocketItem = screen.getByText("responses_websockets_v2").parentElement?.parentElement;
+    expect(websocketItem).toBeTruthy();
+    fireEvent.click(within(websocketItem as HTMLElement).getByRole("switch"));
+    expect(persistCodexConfig).toHaveBeenCalledWith({
+      features_responses_websockets_v2: true,
+    });
 
     // Radio group
     fireEvent.click(screen.getByRole("radio", { name: "禁用 (disabled)" }));
     expect(persistCodexConfig).toHaveBeenCalledWith({ web_search: "disabled" });
+
+    const personalityItem = screen.getByText("输出风格 (personality)").parentElement?.parentElement;
+    expect(personalityItem).toBeTruthy();
+    fireEvent.click(
+      within(personalityItem as HTMLElement).getByRole("radio", { name: "友好 (friendly)" })
+    );
+    expect(persistCodexConfig).toHaveBeenCalledWith({ personality: "friendly" });
+
+    fireEvent.click(
+      within(personalityItem as HTMLElement).getByRole("radio", {
+        name: "默认 / 删除配置 (none)",
+      })
+    );
+    expect(persistCodexConfig).toHaveBeenCalledWith({ personality: "" });
 
     // Model input blur persists trimmed value and clears gpt-5.4-only linked keys.
     const modelItem = screen.getByText("默认模型 (model)").parentElement?.parentElement;
@@ -184,6 +201,34 @@ describe("components/cli-manager/tabs/CodexTab", () => {
       "data-state",
       "checked"
     );
+  });
+
+  it("defaults personality to none when config is unset", () => {
+    render(
+      <CliManagerCodexTab
+        codexAvailable="available"
+        codexLoading={false}
+        codexConfigLoading={false}
+        codexConfigSaving={false}
+        codexConfigTomlLoading={false}
+        codexConfigTomlSaving={false}
+        codexInfo={createCodexInfo()}
+        codexConfig={createCodexConfig({ personality: null })}
+        codexConfigToml={null}
+        refreshCodex={vi.fn()}
+        openCodexConfigDir={vi.fn()}
+        persistCodexConfig={vi.fn()}
+        persistCodexConfigToml={vi.fn().mockResolvedValue(false)}
+      />
+    );
+
+    const personalityItem = screen.getByText("输出风格 (personality)").parentElement?.parentElement;
+    expect(personalityItem).toBeTruthy();
+    expect(
+      within(personalityItem as HTMLElement).getByRole("radio", {
+        name: "默认 / 删除配置 (none)",
+      })
+    ).toBeChecked();
   });
 
   it("shows gpt-5.4 linked settings and persists their defaults", () => {

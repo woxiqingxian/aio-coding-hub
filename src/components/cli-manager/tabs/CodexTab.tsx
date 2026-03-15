@@ -73,6 +73,12 @@ function buildFastModePatch(enabled: boolean): CodexConfigPatch {
   };
 }
 
+function buildPersonalityPatch(value: string): CodexConfigPatch {
+  return {
+    personality: value === "none" ? "" : value,
+  };
+}
+
 function isGpt54Model(model: string | null | undefined) {
   return (model ?? "").trim() === GPT_54_MODEL;
 }
@@ -152,6 +158,7 @@ export function CliManagerCodexTab({
   const [autoCompactLimitText, setAutoCompactLimitText] = useState("");
   const [sandboxModeText, setSandboxModeText] = useState("");
   const [webSearchText, setWebSearchText] = useState("");
+  const [personalityText, setPersonalityText] = useState("none");
   const [reasoningEffortText, setReasoningEffortText] = useState("");
   const [planModeReasoningEffortText, setPlanModeReasoningEffortText] = useState("");
 
@@ -200,6 +207,7 @@ export function CliManagerCodexTab({
     );
     setSandboxModeText(codexConfig.sandbox_mode ?? "");
     setWebSearchText(codexConfig.web_search ?? "cached");
+    setPersonalityText(codexConfig.personality?.trim() || "none");
     setReasoningEffortText(codexConfig.model_reasoning_effort ?? "");
     setPlanModeReasoningEffortText(codexConfig.plan_mode_reasoning_effort ?? "");
   }, [codexConfig]);
@@ -599,6 +607,26 @@ export function CliManagerCodexTab({
                     disabled={saving}
                   />
                 </SettingItem>
+
+                <SettingItem
+                  label="输出风格 (personality)"
+                  subtitle="控制 web_search 结果的输出风格。pragmatic 更务实，friendly 更友好；none 会删除该配置，交给 Codex 默认行为。"
+                >
+                  <RadioGroup
+                    name="personality"
+                    value={personalityText}
+                    onChange={(value) => {
+                      setPersonalityText(value);
+                      void persistCodexConfig(buildPersonalityPatch(value));
+                    }}
+                    options={[
+                      { value: "pragmatic", label: "务实 (pragmatic)" },
+                      { value: "friendly", label: "友好 (friendly)" },
+                      { value: "none", label: "默认 / 删除配置 (none)" },
+                    ]}
+                    disabled={saving}
+                  />
+                </SettingItem>
               </div>
             </div>
 
@@ -735,13 +763,13 @@ export function CliManagerCodexTab({
                 </SettingItem>
 
                 <SettingItem
-                  label="remote_models"
-                  subtitle="实验性：启动时刷新远程模型列表。开启写入 remote_models=true；"
+                  label="responses_websockets_v2"
+                  subtitle="实验性：启用 Responses API websocket 支持（需要中转站支持）。开启写入 responses_websockets_v2=true；关闭删除该项。"
                 >
                   <Switch
-                    checked={boolOrDefault(codexConfig.features_remote_models, false)}
+                    checked={boolOrDefault(codexConfig.features_responses_websockets_v2, false)}
                     onCheckedChange={(checked) =>
-                      void persistCodexConfig({ features_remote_models: checked })
+                      void persistCodexConfig({ features_responses_websockets_v2: checked })
                     }
                     disabled={saving}
                   />

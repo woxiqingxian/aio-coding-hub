@@ -474,7 +474,7 @@ impl ProviderForGateway {
     }
 }
 
-fn get_by_id(
+pub(crate) fn get_by_id(
     conn: &Connection,
     provider_id: i64,
 ) -> crate::shared::error::AppResult<ProviderSummary> {

@@ -334,6 +334,20 @@ fn clear_enabled_for_workspace(
     Ok(())
 }
 
+fn normalize_prompt_name(name: &str) -> crate::shared::error::AppResult<String> {
+    let normalized = name.trim();
+    if normalized.is_empty() {
+        return Err("SEC_INVALID_INPUT: prompt name is required"
+            .to_string()
+            .into());
+    }
+    Ok(normalized.to_string())
+}
+
+fn normalize_prompt_content(content: &str) -> String {
+    content.trim().to_string()
+}
+
 pub fn upsert(
     app: &tauri::AppHandle,
     db: &db::Db,
@@ -343,19 +357,8 @@ pub fn upsert(
     content: &str,
     enabled: bool,
 ) -> crate::shared::error::AppResult<PromptSummary> {
-    let name = name.trim();
-    if name.is_empty() {
-        return Err("SEC_INVALID_INPUT: prompt name is required"
-            .to_string()
-            .into());
-    }
-
-    let content = content.trim();
-    if content.is_empty() {
-        return Err("SEC_INVALID_INPUT: prompt content is required"
-            .to_string()
-            .into());
-    }
+    let name = normalize_prompt_name(name)?;
+    let content = normalize_prompt_content(content);
 
     let mut conn = db.open_connection()?;
     let cli_key = workspaces::get_cli_key_by_id(&conn, workspace_id)?;
@@ -394,8 +397,8 @@ INSERT INTO prompts(
 "#,
                 params![
                     workspace_id,
-                    name,
-                    content,
+                    name.as_str(),
+                    content.as_str(),
                     enabled_to_int(enabled),
                     now,
                     now
@@ -418,7 +421,7 @@ INSERT INTO prompts(
             let id = tx.last_insert_rowid();
 
             if touched_files {
-                if let Err(err) = prompt_sync::apply_enabled_prompt(app, &cli_key, id, content) {
+                if let Err(err) = prompt_sync::apply_enabled_prompt(app, &cli_key, id, &content) {
                     let _ = prompt_sync::restore_target_bytes(app, &cli_key, prev_target_bytes);
                     let _ = prompt_sync::restore_manifest_bytes(app, &cli_key, prev_manifest_bytes);
                     return Err(err);
@@ -472,7 +475,7 @@ SET
   updated_at = ?4
 WHERE id = ?5
 "#,
-                params![name, content, enabled_to_int(enabled), now, id],
+                params![name.as_str(), content.as_str(), enabled_to_int(enabled), now, id],
             )
             .map_err(|e| match e {
                 rusqlite::Error::SqliteFailure(err, _) if err.code == rusqlite::ErrorCode::ConstraintViolation => {
@@ -489,7 +492,7 @@ WHERE id = ?5
                 }
                 .and_then(|_| {
                     if needs_file_apply {
-                        prompt_sync::apply_enabled_prompt(app, &cli_key, id, content)
+                        prompt_sync::apply_enabled_prompt(app, &cli_key, id, &content)
                     } else {
                         Ok(())
                     }
@@ -676,5 +679,31 @@ LIMIT 1
             prompt_sync::apply_enabled_prompt(app, &cli_key, prompt_id, &content)
         }
         None => prompt_sync::restore_disabled_prompt(app, &cli_key),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{normalize_prompt_content, normalize_prompt_name};
+
+    #[test]
+    fn normalize_prompt_name_rejects_blank_values() {
+        assert!(normalize_prompt_name("   ").is_err());
+    }
+
+    #[test]
+    fn normalize_prompt_name_trims_surrounding_whitespace() {
+        assert_eq!(normalize_prompt_name("  Prompt A  ").unwrap(), "Prompt A");
+    }
+
+    #[test]
+    fn normalize_prompt_content_allows_empty_string() {
+        assert_eq!(normalize_prompt_content(""), "");
+        assert_eq!(normalize_prompt_content("   "), "");
+    }
+
+    #[test]
+    fn normalize_prompt_content_keeps_meaningful_text() {
+        assert_eq!(normalize_prompt_content("  hello world  "), "hello world");
     }
 }

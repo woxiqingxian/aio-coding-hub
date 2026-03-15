@@ -19,6 +19,7 @@ pub struct CodexConfigState {
     pub model_reasoning_effort: Option<String>,
     pub plan_mode_reasoning_effort: Option<String>,
     pub web_search: Option<String>,
+    pub personality: Option<String>,
     pub model_context_window: Option<u64>,
     pub model_auto_compact_token_limit: Option<u64>,
     pub service_tier: Option<String>,
@@ -33,6 +34,7 @@ pub struct CodexConfigState {
     pub features_remote_compaction: Option<bool>,
     pub features_fast_mode: Option<bool>,
     pub features_remote_models: Option<bool>,
+    pub features_responses_websockets_v2: Option<bool>,
     pub features_multi_agent: Option<bool>,
 }
 
@@ -44,6 +46,7 @@ pub struct CodexConfigPatch {
     pub model_reasoning_effort: Option<String>,
     pub plan_mode_reasoning_effort: Option<String>,
     pub web_search: Option<String>,
+    pub personality: Option<String>,
     #[serde(default, deserialize_with = "deserialize_nullable_u64_patch")]
     pub model_context_window: Option<Option<u64>>,
     #[serde(default, deserialize_with = "deserialize_nullable_u64_patch")]
@@ -60,6 +63,7 @@ pub struct CodexConfigPatch {
     pub features_remote_compaction: Option<bool>,
     pub features_fast_mode: Option<bool>,
     pub features_remote_models: Option<bool>,
+    pub features_responses_websockets_v2: Option<bool>,
     pub features_multi_agent: Option<bool>,
 }
 
@@ -566,8 +570,8 @@ enum TableStyle {
     Dotted,
 }
 
-const FEATURES_KEY_ORDER: [&str; 9] = [
-    // Keep in sync with the UI order (CliManagerCodexTab / Features section).
+const FEATURES_KEY_ORDER: [&str; 10] = [
+    // Keep a stable persisted order for feature flags in config.toml.
     "shell_snapshot",
     "unified_exec",
     "shell_tool",
@@ -576,6 +580,7 @@ const FEATURES_KEY_ORDER: [&str; 9] = [
     "remote_compaction",
     "fast_mode",
     "remote_models",
+    "responses_websockets_v2",
     "multi_agent",
 ];
 
@@ -885,6 +890,7 @@ fn make_state_from_bytes(
         model_reasoning_effort: None,
         plan_mode_reasoning_effort: None,
         web_search: None,
+        personality: None,
         model_context_window: None,
         model_auto_compact_token_limit: None,
         service_tier: None,
@@ -899,6 +905,7 @@ fn make_state_from_bytes(
         features_remote_compaction: None,
         features_fast_mode: None,
         features_remote_models: None,
+        features_responses_websockets_v2: None,
         features_multi_agent: None,
     };
 
@@ -971,6 +978,10 @@ fn make_state_from_bytes(
                 state.plan_mode_reasoning_effort = parse_string(&raw_value)
             }
             ("", "web_search") => state.web_search = parse_string(&raw_value),
+            ("", "personality") => {
+                state.personality =
+                    parse_string(&raw_value).filter(|value| !value.trim().is_empty())
+            }
             ("", "model_context_window") => state.model_context_window = parse_u64(&raw_value),
             ("", "model_auto_compact_token_limit") => {
                 state.model_auto_compact_token_limit = parse_u64(&raw_value)
@@ -995,6 +1006,9 @@ fn make_state_from_bytes(
             }
             ("features", "fast_mode") => state.features_fast_mode = parse_bool(&raw_value),
             ("features", "remote_models") => state.features_remote_models = parse_bool(&raw_value),
+            ("features", "responses_websockets_v2") => {
+                state.features_responses_websockets_v2 = parse_bool(&raw_value)
+            }
             ("features", "multi_agent") => state.features_multi_agent = parse_bool(&raw_value),
 
             _ => {}
@@ -1158,6 +1172,15 @@ fn validate_codex_config_toml_raw(input: &str) -> CodexConfigTomlValidationResul
                 };
             }
 
+            if let Some(err) =
+                validate_root_string_enum(table, "personality", &["pragmatic", "friendly"])
+            {
+                return CodexConfigTomlValidationResult {
+                    ok: false,
+                    error: Some(err),
+                };
+            }
+
             CodexConfigTomlValidationResult {
                 ok: true,
                 error: None,
@@ -1303,6 +1326,11 @@ fn patch_config_toml(
         patch.web_search.as_deref().unwrap_or(""),
         &["cached", "live", "disabled"],
     )?;
+    validate_enum_or_empty(
+        "personality",
+        patch.personality.as_deref().unwrap_or(""),
+        &["pragmatic", "friendly"],
+    )?;
 
     let input = match current {
         Some(bytes) => String::from_utf8(bytes)
@@ -1368,6 +1396,14 @@ fn patch_config_toml(
             (!trimmed.is_empty()).then(|| toml_string_literal(trimmed)),
         );
     }
+    if let Some(raw) = patch.personality.as_deref() {
+        let trimmed = raw.trim();
+        upsert_root_key(
+            &mut lines,
+            "personality",
+            (!trimmed.is_empty()).then(|| toml_string_literal(trimmed)),
+        );
+    }
     if let Some(value) = patch.model_context_window {
         upsert_root_key(
             &mut lines,
@@ -1410,6 +1446,7 @@ fn patch_config_toml(
         || patch.features_remote_compaction.is_some()
         || patch.features_fast_mode.is_some()
         || patch.features_remote_models.is_some()
+        || patch.features_responses_websockets_v2.is_some()
         || patch.features_multi_agent.is_some();
 
     if has_any_feature_patch {
@@ -1439,6 +1476,9 @@ fn patch_config_toml(
         }
         if let Some(v) = patch.features_remote_models {
             items.push(("remote_models", v.then(|| "true".to_string())));
+        }
+        if let Some(v) = patch.features_responses_websockets_v2 {
+            items.push(("responses_websockets_v2", v.then(|| "true".to_string())));
         }
         if let Some(v) = patch.features_multi_agent {
             items.push(("multi_agent", v.then(|| "true".to_string())));

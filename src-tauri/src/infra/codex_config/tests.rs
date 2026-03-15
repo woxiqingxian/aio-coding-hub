@@ -8,6 +8,7 @@ fn empty_patch() -> CodexConfigPatch {
         model_reasoning_effort: None,
         plan_mode_reasoning_effort: None,
         web_search: None,
+        personality: None,
         model_context_window: None,
         model_auto_compact_token_limit: None,
         service_tier: None,
@@ -20,6 +21,7 @@ fn empty_patch() -> CodexConfigPatch {
         features_remote_compaction: None,
         features_fast_mode: None,
         features_remote_models: None,
+        features_responses_websockets_v2: None,
         features_multi_agent: None,
     }
 }
@@ -257,6 +259,47 @@ fast_mode = true
 }
 
 #[test]
+fn patch_writes_personality_and_websocket_feature() {
+    let out = patch_config_toml(
+        None,
+        CodexConfigPatch {
+            personality: Some("pragmatic".to_string()),
+            features_responses_websockets_v2: Some(true),
+            ..empty_patch()
+        },
+    )
+    .expect("patch_config_toml");
+
+    let s = String::from_utf8(out).expect("utf8");
+    assert!(s.contains("personality = \"pragmatic\""), "{s}");
+    assert!(s.contains("[features]"), "{s}");
+    assert!(s.contains("responses_websockets_v2 = true"), "{s}");
+}
+
+#[test]
+fn patch_deletes_personality_and_websocket_feature_when_disabled() {
+    let input = r#"personality = "friendly"
+
+[features]
+responses_websockets_v2 = true
+"#;
+
+    let out = patch_config_toml(
+        Some(input.as_bytes().to_vec()),
+        CodexConfigPatch {
+            personality: Some(String::new()),
+            features_responses_websockets_v2: Some(false),
+            ..empty_patch()
+        },
+    )
+    .expect("patch_config_toml");
+
+    let s = String::from_utf8(out).expect("utf8");
+    assert!(!s.contains("personality ="), "{s}");
+    assert!(!s.contains("responses_websockets_v2 ="), "{s}");
+}
+
+#[test]
 fn patch_deletes_feature_when_disabled() {
     let input = r#"[features]
 shell_tool = true
@@ -393,6 +436,15 @@ fn validate_raw_rejects_invalid_enum_values() {
 }
 
 #[test]
+fn validate_raw_rejects_invalid_personality_values() {
+    let out = validate_codex_config_toml_raw("personality = \"none\"");
+    assert!(!out.ok, "{out:?}");
+    let err = out.error.expect("error");
+    assert!(err.message.contains("personality"), "{err:?}");
+    assert!(err.message.contains("allowed:"), "{err:?}");
+}
+
+#[test]
 fn parse_reads_sandbox_mode_from_sandbox_table() {
     let input = r#"[sandbox]
 mode = "read-only"
@@ -446,6 +498,26 @@ fast_mode = true
 
     assert_eq!(state.service_tier.as_deref(), Some("fast"));
     assert_eq!(state.features_fast_mode, Some(true));
+}
+
+#[test]
+fn parse_reads_personality_and_websocket_feature() {
+    let input = r#"personality = "friendly"
+
+[features]
+responses_websockets_v2 = true
+"#;
+
+    let state = make_state_from_bytes(
+        "dir".to_string(),
+        "path".to_string(),
+        true,
+        Some(input.as_bytes().to_vec()),
+    )
+    .expect("make_state_from_bytes");
+
+    assert_eq!(state.personality.as_deref(), Some("friendly"));
+    assert_eq!(state.features_responses_websockets_v2, Some(true));
 }
 
 #[test]

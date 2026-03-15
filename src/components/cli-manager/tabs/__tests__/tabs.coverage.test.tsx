@@ -92,6 +92,7 @@ describe("cli-manager tabs (coverage)", () => {
           model_reasoning_effort: "medium",
           plan_mode_reasoning_effort: "high",
           web_search: "cached",
+          personality: "pragmatic",
           model_context_window: 1000000,
           model_auto_compact_token_limit: 900000,
           service_tier: "fast",
@@ -104,6 +105,7 @@ describe("cli-manager tabs (coverage)", () => {
           features_remote_compaction: true,
           features_fast_mode: true,
           features_remote_models: true,
+          features_responses_websockets_v2: true,
           features_multi_agent: true,
         }}
         codexConfigToml={{
