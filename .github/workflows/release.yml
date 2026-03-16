@@ -337,7 +337,7 @@ jobs:
           set -euo pipefail
 
           # Download pinned stable release of appimagetool (no FUSE required).
-          TOOL_URL="https://github.com/AppImage/AppImageKit/releases/download/13/appimagetool-x86_64.AppImage"
+          TOOL_URL="https://github.com/AppImage/appimagetool/releases/download/1.9.1/appimagetool-x86_64.AppImage"
           TOOL_BIN="$(mktemp)"
           curl -fsSL "$TOOL_URL" -o "$TOOL_BIN"
           chmod +x "$TOOL_BIN"
