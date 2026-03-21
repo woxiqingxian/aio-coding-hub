@@ -3,7 +3,6 @@
 // - This module is intentionally kept thin: it composes smaller, cohesive sub-components.
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { RefreshCw } from "lucide-react";
 import { useNowUnix } from "../../hooks/useNowUnix";
 import type { OpenCircuitRow } from "../ProviderCircuitBadge";
 import type { GatewayActiveSession } from "../../services/gateway";
@@ -22,7 +21,6 @@ import { Button } from "../../ui/Button";
 import { Card } from "../../ui/Card";
 import { EmptyState } from "../../ui/EmptyState";
 import { TabList } from "../../ui/TabList";
-import { cn } from "../../utils/cn";
 import { formatCountdownSeconds } from "../../utils/formatters";
 import { HomeActiveSessionsCardContent } from "./HomeActiveSessionsCard";
 import { CliBrandIcon } from "./CliBrandIcon";
@@ -476,26 +474,6 @@ export function HomeOverviewPanel({
                 className="w-full overflow-x-auto"
                 buttonClassName="whitespace-nowrap flex-1"
               />
-              <div className="flex items-center gap-2 text-xs text-slate-400">
-                {sessionsTab === "providerLimit" && (
-                  <button
-                    type="button"
-                    onClick={onRefreshProviderLimit}
-                    disabled={providerLimitRefreshing}
-                    className={cn(
-                      "flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition-all",
-                      providerLimitRefreshing
-                        ? "bg-slate-100 dark:bg-slate-700 text-slate-400 cursor-not-allowed"
-                        : "bg-indigo-50 text-indigo-600 hover:bg-indigo-100"
-                    )}
-                  >
-                    <RefreshCw
-                      className={cn("h-3 w-3", providerLimitRefreshing && "animate-spin")}
-                    />
-                    刷新
-                  </button>
-                )}
-              </div>
             </div>
 
             <div className="flex-1 min-h-0 mt-3">
@@ -522,6 +500,8 @@ export function HomeOverviewPanel({
                   rows={displayedProviderLimitRows}
                   loading={providerLimitLoading}
                   available={providerLimitAvailable}
+                  onRefresh={onRefreshProviderLimit}
+                  refreshing={providerLimitRefreshing}
                 />
               ) : displayedCircuits.length === 0 ? (
                 <EmptyState title="当前没有熔断中的 Provider" />

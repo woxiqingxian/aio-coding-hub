@@ -223,6 +223,8 @@ export type HomeProviderLimitPanelContentProps = {
   rows: ProviderLimitUsageRow[];
   loading: boolean;
   available: boolean | null;
+  onRefresh?: () => void;
+  refreshing?: boolean;
 };
 
 /** Content-only version for embedding in external Card */
@@ -230,6 +232,8 @@ export function HomeProviderLimitPanelContent({
   rows,
   loading,
   available,
+  onRefresh,
+  refreshing = false,
 }: HomeProviderLimitPanelContentProps) {
   const sortedRows = useMemo(() => {
     return rows.slice().sort((a, b) => {
@@ -257,10 +261,26 @@ export function HomeProviderLimitPanelContent({
   }
 
   return (
-    <div className="space-y-2 h-full overflow-auto pr-1 scrollbar-overlay">
-      {sortedRows.map((row) => (
-        <ProviderCard key={`${row.cli_key}:${row.provider_id}`} row={row} />
-      ))}
+    <div className="flex flex-col h-full gap-2">
+      <div className="flex items-center justify-between shrink-0">
+        <span className="text-xs text-slate-400 dark:text-slate-500">{rows.length} 个供应商</span>
+        {onRefresh && (
+          <button
+            type="button"
+            onClick={onRefresh}
+            disabled={refreshing}
+            className="rounded-md p-1 text-slate-400 transition-colors hover:bg-slate-100 hover:text-indigo-600 disabled:cursor-not-allowed disabled:opacity-50 dark:hover:bg-slate-700 dark:hover:text-indigo-400"
+            title="刷新供应商限额"
+          >
+            <RefreshCw className={cn("h-3.5 w-3.5", refreshing && "animate-spin")} />
+          </button>
+        )}
+      </div>
+      <div className="space-y-2 flex-1 min-h-0 overflow-auto pr-1 scrollbar-overlay">
+        {sortedRows.map((row) => (
+          <ProviderCard key={`${row.cli_key}:${row.provider_id}`} row={row} />
+        ))}
+      </div>
     </div>
   );
 }
