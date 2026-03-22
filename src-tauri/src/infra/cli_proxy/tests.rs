@@ -1,14 +1,15 @@
 use super::*;
 use std::ffi::OsString;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, MutexGuard, OnceLock};
 
+use crate::shared::mutex_ext::MutexExt;
+
 static ENV_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+static TEST_ENV_SEQ: AtomicU64 = AtomicU64::new(1);
 
 fn env_lock() -> MutexGuard<'static, ()> {
-    ENV_LOCK
-        .get_or_init(|| Mutex::new(()))
-        .lock()
-        .expect("lock test env")
+    ENV_LOCK.get_or_init(|| Mutex::new(())).lock_or_recover()
 }
 
 #[derive(Default)]
@@ -27,11 +28,6 @@ impl EnvRestore {
     fn set_var(&mut self, key: &'static str, value: impl Into<OsString>) {
         self.save_once(key);
         std::env::set_var(key, value.into());
-    }
-
-    fn remove_var(&mut self, key: &'static str) {
-        self.save_once(key);
-        std::env::remove_var(key);
     }
 }
 
@@ -58,16 +54,19 @@ impl CliProxyTestApp {
     fn new() -> Self {
         let lock = env_lock();
         let home = tempfile::tempdir().expect("tempdir");
+        let seq = TEST_ENV_SEQ.fetch_add(1, Ordering::Relaxed);
 
         let mut env = EnvRestore::default();
         let home_os = home.path().as_os_str().to_os_string();
         env.set_var("HOME", home_os.clone());
         env.set_var("USERPROFILE", home_os);
+        // 显式隔离 Codex 配置目录，避免 CI 上 home_dir 解析差异导致测试串扰。
+        env.set_var("CODEX_HOME", home.path().join(".codex").into_os_string());
+        // app data 目录也使用每测例唯一 dotdir，避免共享真实 HOME 时读到旧 manifest。
         env.set_var(
             "AIO_CODING_HUB_DOTDIR_NAME",
-            ".aio-coding-hub-cli-proxy-test",
+            format!(".aio-coding-hub-cli-proxy-test-{seq}"),
         );
-        env.remove_var("CODEX_HOME");
 
         Self {
             _lock: lock,
