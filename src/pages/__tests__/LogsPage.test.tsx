@@ -14,8 +14,18 @@ import {
 } from "../../query/requestLogs";
 
 vi.mock("../../components/home/HomeRequestLogsPanel", () => ({
-  HomeRequestLogsPanel: ({ requestLogs }: { requestLogs: Array<{ id: number }> }) => (
-    <div data-testid="home-request-logs-panel">count:{requestLogs.length}</div>
+  HomeRequestLogsPanel: ({
+    requestLogs,
+    summaryTextOverride,
+    emptyStateTitle,
+  }: {
+    requestLogs: Array<{ id: number }>;
+    summaryTextOverride?: string;
+    emptyStateTitle?: string;
+  }) => (
+    <div data-testid="home-request-logs-panel">
+      count:{requestLogs.length}|summary:{summaryTextOverride ?? ""}|empty:{emptyStateTitle ?? ""}
+    </div>
   ),
 }));
 
@@ -129,12 +139,16 @@ describe("pages/LogsPage", () => {
 
     renderWithProviders(<LogsPage />);
 
-    expect(screen.getByText("count:3")).toBeInTheDocument();
+    expect(
+      screen.getByText("count:3|summary:共 3 / 3 条|empty:当前没有代理记录")
+    ).toBeInTheDocument();
 
     fireEvent.change(screen.getByPlaceholderText("例：499 / 524 / !200 / >=400"), {
       target: { value: "499" },
     });
-    expect(screen.getByText("count:1")).toBeInTheDocument();
+    expect(
+      screen.getByText("count:1|summary:共 1 / 3 条|empty:没有符合筛选条件的代理记录")
+    ).toBeInTheDocument();
   });
   it("filters logs by negated status expression (!200)", () => {
     setTauriRuntime();
@@ -158,7 +172,9 @@ describe("pages/LogsPage", () => {
     fireEvent.change(screen.getByPlaceholderText("例：499 / 524 / !200 / >=400"), {
       target: { value: "!200" },
     });
-    expect(screen.getByText("count:2")).toBeInTheDocument();
+    expect(
+      screen.getByText("count:2|summary:共 2 / 3 条|empty:没有符合筛选条件的代理记录")
+    ).toBeInTheDocument();
   });
 
   it("filters logs by >=400 status expression", () => {
@@ -183,7 +199,9 @@ describe("pages/LogsPage", () => {
     fireEvent.change(screen.getByPlaceholderText("例：499 / 524 / !200 / >=400"), {
       target: { value: ">=400" },
     });
-    expect(screen.getByText("count:2")).toBeInTheDocument();
+    expect(
+      screen.getByText("count:2|summary:共 2 / 3 条|empty:没有符合筛选条件的代理记录")
+    ).toBeInTheDocument();
   });
 
   it("filters logs by <=399 status expression", () => {
@@ -207,7 +225,9 @@ describe("pages/LogsPage", () => {
     fireEvent.change(screen.getByPlaceholderText("例：499 / 524 / !200 / >=400"), {
       target: { value: "<=399" },
     });
-    expect(screen.getByText("count:1")).toBeInTheDocument();
+    expect(
+      screen.getByText("count:1|summary:共 1 / 2 条|empty:没有符合筛选条件的代理记录")
+    ).toBeInTheDocument();
   });
 
   it("filters logs by error_code", () => {
@@ -238,7 +258,9 @@ describe("pages/LogsPage", () => {
     fireEvent.change(screen.getByPlaceholderText("例：GW_UPSTREAM_TIMEOUT"), {
       target: { value: "ABORTED" },
     });
-    expect(screen.getByText("count:1")).toBeInTheDocument();
+    expect(
+      screen.getByText("count:1|summary:共 1 / 2 条|empty:没有符合筛选条件的代理记录")
+    ).toBeInTheDocument();
   });
 
   it("filters logs by path", () => {
@@ -269,6 +291,8 @@ describe("pages/LogsPage", () => {
     fireEvent.change(screen.getByPlaceholderText("例：/v1/messages"), {
       target: { value: "messages" },
     });
-    expect(screen.getByText("count:1")).toBeInTheDocument();
+    expect(
+      screen.getByText("count:1|summary:共 1 / 2 条|empty:没有符合筛选条件的代理记录")
+    ).toBeInTheDocument();
   });
 });

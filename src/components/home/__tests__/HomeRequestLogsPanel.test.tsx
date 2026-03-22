@@ -420,6 +420,31 @@ describe("components/home/HomeRequestLogsPanel", () => {
     expect(screen.getAllByText("加载中…").length).toBeGreaterThan(0);
   });
 
+  it("supports page-specific summary and empty state copy", () => {
+    render(
+      <MemoryRouter>
+        <HomeRequestLogsPanel
+          showCustomTooltip={false}
+          title="代理记录列表"
+          summaryTextOverride="共 0 / 3 条"
+          emptyStateTitle="没有符合筛选条件的代理记录"
+          traces={[]}
+          requestLogs={[]}
+          requestLogsLoading={false}
+          requestLogsRefreshing={false}
+          requestLogsAvailable={true}
+          onRefreshRequestLogs={vi.fn()}
+          selectedLogId={null}
+          onSelectLogId={vi.fn()}
+        />
+      </MemoryRouter>
+    );
+
+    expect(screen.getByText("代理记录列表")).toBeInTheDocument();
+    expect(screen.getByText("共 0 / 3 条")).toBeInTheDocument();
+    expect(screen.getByText("没有符合筛选条件的代理记录")).toBeInTheDocument();
+  });
+
   it("renders preview rows when dev preview is enabled in empty state", () => {
     render(
       <MemoryRouter>

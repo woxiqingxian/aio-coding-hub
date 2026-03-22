@@ -396,9 +396,11 @@ export type HomeRequestLogsPanelProps = {
   showCustomTooltip: boolean;
   title?: string;
   showSummaryText?: boolean;
+  summaryTextOverride?: string;
   showOpenLogsPageButton?: boolean;
   showCompactModeToggle?: boolean;
   compactModeOverride?: boolean;
+  emptyStateTitle?: string;
   devPreviewEnabled?: boolean;
 
   traces: TraceSession[];
@@ -417,9 +419,11 @@ export function HomeRequestLogsPanel({
   showCustomTooltip,
   title,
   showSummaryText = true,
+  summaryTextOverride,
   showOpenLogsPageButton = true,
   showCompactModeToggle = true,
   compactModeOverride,
+  emptyStateTitle = "当前没有最近使用记录",
   devPreviewEnabled = false,
   traces,
   requestLogs,
@@ -459,13 +463,14 @@ export function HomeRequestLogsPanel({
   const displayedTraces = traces.length > 0 ? traces : previewTraces;
   const displayedRequestLogs = requestLogs.length > 0 ? requestLogs : previewRequestLogs;
   const summaryText =
-    requestLogsAvailable === false
+    summaryTextOverride ??
+    (requestLogsAvailable === false
       ? "数据不可用"
       : displayedRequestLogs.length === 0 && requestLogsLoading
         ? "加载中…"
         : requestLogsLoading || requestLogsRefreshing
           ? `更新中… · 共 ${displayedRequestLogs.length} 条`
-          : `共 ${displayedRequestLogs.length} 条`;
+          : `共 ${displayedRequestLogs.length} 条`);
   const realtimeTraceCandidates = useMemo(() => {
     const logsByTraceId = new Map<string, RequestLogSummary>();
     for (const log of displayedRequestLogs) {
@@ -544,6 +549,7 @@ export function HomeRequestLogsPanel({
           requestLogsAvailable={requestLogsAvailable}
           requestLogs={displayedRequestLogs}
           requestLogsLoading={requestLogsLoading}
+          emptyStateTitle={emptyStateTitle}
           selectedLogId={selectedLogId}
           onSelectLogId={onSelectLogId}
         />
@@ -561,6 +567,7 @@ type RequestLogsListProps = {
   requestLogsAvailable: boolean | null;
   requestLogs: RequestLogSummary[];
   requestLogsLoading: boolean;
+  emptyStateTitle: string;
   selectedLogId: number | null;
   onSelectLogId: (id: number | null) => void;
 };
@@ -573,6 +580,7 @@ const RequestLogsList = memo(function RequestLogsList({
   requestLogsAvailable,
   requestLogs,
   requestLogsLoading,
+  emptyStateTitle,
   selectedLogId,
   onSelectLogId,
 }: RequestLogsListProps) {
@@ -623,7 +631,7 @@ const RequestLogsList = memo(function RequestLogsList({
             加载中…
           </div>
         ) : (
-          <EmptyState title="当前没有最近使用记录" />
+          <EmptyState title={emptyStateTitle} />
         )
       ) : useVirtual ? (
         <div

@@ -119,6 +119,14 @@ export function LogsPage() {
       return true;
     });
   }, [cliKey, errorCodeFilter, pathFilter, requestLogs, statusPredicate]);
+  const logsSummaryText =
+    requestLogsAvailable === false
+      ? undefined
+      : requestLogs.length === 0 && requestLogsLoading
+        ? "加载中…"
+        : requestLogsRefreshing
+          ? `更新中… · 共 ${filteredLogs.length} / ${requestLogs.length} 条`
+          : `共 ${filteredLogs.length} / ${requestLogs.length} 条`;
 
   function resetFilters() {
     setCliKey("all");
@@ -230,9 +238,11 @@ export function LogsPage() {
       <HomeRequestLogsPanel
         showCustomTooltip={showCustomTooltip}
         title="代理记录列表"
+        summaryTextOverride={logsSummaryText}
         showOpenLogsPageButton={false}
         showCompactModeToggle={false}
         compactModeOverride={false}
+        emptyStateTitle={activeFilterCount > 0 ? "没有符合筛选条件的代理记录" : "当前没有代理记录"}
         traces={[]}
         requestLogs={filteredLogs}
         requestLogsLoading={requestLogsLoading}
