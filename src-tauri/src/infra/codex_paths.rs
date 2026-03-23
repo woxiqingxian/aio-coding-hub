@@ -1,5 +1,6 @@
 //! Usage: Resolve Codex user-level paths (supports $CODEX_HOME).
 
+use crate::settings;
 use std::path::{Path, PathBuf};
 use tauri::Manager;
 
@@ -37,7 +38,42 @@ fn resolve_under_home(home: &Path, raw: &str) -> PathBuf {
     home.join(candidate)
 }
 
-pub fn codex_home_dir<R: tauri::Runtime>(
+fn normalize_codex_home_path(path: PathBuf) -> PathBuf {
+    let Some(file_name) = path.file_name().and_then(|value| value.to_str()) else {
+        return path;
+    };
+
+    if !file_name.eq_ignore_ascii_case("config.toml") {
+        return path;
+    }
+
+    path.parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .map(Path::to_path_buf)
+        .unwrap_or(path)
+}
+
+pub(crate) fn configured_codex_home_dir<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+) -> Option<PathBuf> {
+    let home = home_dir(app).ok()?;
+
+    settings::read(app)
+        .ok()
+        .filter(|settings| settings.codex_home_mode == settings::CodexHomeMode::Custom)
+        .map(|settings| settings.codex_home_override)
+        .filter(|value| !value.trim().is_empty())
+        .map(|value| resolve_under_home(&home, &value))
+        .map(normalize_codex_home_path)
+}
+
+pub fn codex_home_dir_user_default<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+) -> crate::shared::error::AppResult<PathBuf> {
+    Ok(home_dir(app)?.join(".codex"))
+}
+
+pub fn codex_home_dir_follow_env_or_default<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
 ) -> crate::shared::error::AppResult<PathBuf> {
     let home = home_dir(app)?;
@@ -47,9 +83,26 @@ pub fn codex_home_dir<R: tauri::Runtime>(
         .filter(|v| !v.is_empty());
 
     Ok(match raw {
-        Some(v) => resolve_under_home(&home, &v),
-        None => home.join(".codex"),
+        Some(v) => normalize_codex_home_path(resolve_under_home(&home, &v)),
+        None => codex_home_dir_user_default(app)?,
     })
+}
+
+pub fn codex_home_dir<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+) -> crate::shared::error::AppResult<PathBuf> {
+    let mode = settings::read(app)
+        .ok()
+        .map(|settings| settings.codex_home_mode)
+        .unwrap_or_default();
+
+    match mode {
+        settings::CodexHomeMode::UserHomeDefault => codex_home_dir_user_default(app),
+        settings::CodexHomeMode::FollowCodexHome => codex_home_dir_follow_env_or_default(app),
+        settings::CodexHomeMode::Custom => configured_codex_home_dir(app)
+            .map(Ok)
+            .unwrap_or_else(|| codex_home_dir_user_default(app)),
+    }
 }
 
 pub fn codex_config_toml_path<R: tauri::Runtime>(

@@ -92,6 +92,7 @@ export const tauriEmit = vi.fn(async (event: string, payload?: unknown) => {
 export const tauriOpenUrl = vi.fn();
 export const tauriOpenPath = vi.fn();
 export const tauriRevealItemInDir = vi.fn();
+export const tauriDialogOpen = vi.fn();
 
 export const tauriIsPermissionGranted = vi.fn().mockResolvedValue(false);
 export const tauriRequestPermission = vi.fn().mockResolvedValue("denied");
@@ -121,6 +122,10 @@ vi.mock("@tauri-apps/plugin-opener", () => ({
   openUrl: tauriOpenUrl,
   openPath: tauriOpenPath,
   revealItemInDir: tauriRevealItemInDir,
+}));
+
+vi.mock("@tauri-apps/plugin-dialog", () => ({
+  open: tauriDialogOpen,
 }));
 
 vi.mock("@tauri-apps/plugin-notification", () => ({

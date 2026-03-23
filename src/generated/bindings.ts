@@ -57,6 +57,8 @@ export type AppSettings = {
   wsl_target_cli: WslTargetCli;
   wsl_host_address_mode: WslHostAddressMode;
   wsl_custom_host_address: string;
+  codex_home_mode: CodexHomeMode;
+  codex_home_override: string;
   auto_start: boolean;
   start_minimized: boolean;
   tray_enabled: boolean;
@@ -95,6 +97,7 @@ export type ClaudeModels = {
   sonnet_model?: string | null;
   opus_model?: string | null;
 };
+export type CodexHomeMode = "user_home_default" | "follow_codex_home" | "custom";
 export type DailyResetMode = "fixed" | "rolling";
 export type GatewayListenMode = "localhost" | "wsl_auto" | "lan" | "custom";
 export type HomeUsagePeriod = "last_7" | "last_15" | "last_30" | "month";
@@ -193,6 +196,8 @@ export type SettingsUpdate = {
   wslTargetCli: WslTargetCli | null;
   wslHostAddressMode: WslHostAddressMode | null;
   wslCustomHostAddress: string | null;
+  codexHomeMode: CodexHomeMode | null;
+  codexHomeOverride: string | null;
 };
 export type WslHostAddressMode = "auto" | "custom";
 export type WslTargetCli = { claude: boolean; codex: boolean; gemini: boolean };

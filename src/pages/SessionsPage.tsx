@@ -19,6 +19,7 @@ import { Select } from "../ui/Select";
 import { useCliSessionsProjectsListQuery } from "../query/cliSessions";
 import { useWslDetectionQuery } from "../query/wsl";
 import { cn } from "../utils/cn";
+import { isWindowsRuntime } from "../utils/platform";
 import { formatRelativeTimeFromUnixSeconds, formatUnixSeconds } from "../utils/formatters";
 
 const SOURCE_TABS: Array<{ key: CliSessionsSource; label: string }> = [
@@ -27,10 +28,6 @@ const SOURCE_TABS: Array<{ key: CliSessionsSource; label: string }> = [
 ];
 
 type ProjectSortKey = "recent" | "sessions" | "name";
-
-function isWindowsRuntime() {
-  return typeof navigator !== "undefined" && /Win/.test(navigator.userAgent);
-}
 
 function normalizeSource(raw: string | null): CliSessionsSource | null {
   if (raw === "claude" || raw === "codex") return raw;

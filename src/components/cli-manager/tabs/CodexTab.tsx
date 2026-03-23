@@ -16,6 +16,9 @@ import {
   type CodexConfigTomlValidationResult,
   type SimpleCliInfo,
 } from "../../../services/cliManager";
+import type { AppSettings, CodexHomeMode } from "../../../services/settings";
+import { normalizeCustomCodexHome, buildConfigTomlPath } from "../../../utils/codexPaths";
+import { isWindowsRuntime } from "../../../utils/platform";
 import { cn } from "../../../utils/cn";
 import { Button } from "../../../ui/Button";
 import { Card } from "../../../ui/Card";
@@ -83,6 +86,33 @@ function isGpt54Model(model: string | null | undefined) {
   return (model ?? "").trim() === GPT_54_MODEL;
 }
 
+function validateCustomCodexHome(value: string): string | null {
+  const trimmed = value.trim();
+  const normalized = normalizeCustomCodexHome(trimmed);
+  if (!normalized) return "请输入 .codex 目录路径。";
+
+  const lower = trimmed.replace(/\\/g, "/").toLowerCase();
+  if (lower.includes("://")) {
+    return "这里填写的是本地目录路径，不要包含协议头。";
+  }
+  if (/[\r\n\u0000]/.test(trimmed)) {
+    return "路径中不能包含换行或控制字符。";
+  }
+  if (lower.endsWith(".toml") && lower !== "config.toml" && !lower.endsWith("/config.toml")) {
+    return "这里填写的是 .codex 目录，不是其他 TOML 文件。";
+  }
+
+  return null;
+}
+
+function normalizeComparablePath(path: string) {
+  return path
+    .trim()
+    .replace(/[\\/]+$/, "")
+    .replace(/\\/g, "/")
+    .toLowerCase();
+}
+
 export type CliManagerAvailability = "checking" | "available" | "unavailable";
 
 export type CliManagerCodexTabProps = {
@@ -95,10 +125,17 @@ export type CliManagerCodexTabProps = {
   codexInfo: SimpleCliInfo | null;
   codexConfig: CodexConfigState | null;
   codexConfigToml: CodexConfigTomlState | null;
+  appSettings?: AppSettings | null;
+  codexHomeSettingsSaving?: boolean;
   refreshCodex: () => Promise<void> | void;
   openCodexConfigDir: () => Promise<void> | void;
   persistCodexConfig: (patch: CodexConfigPatch) => Promise<void> | void;
   persistCodexConfigToml: (toml: string) => Promise<boolean> | boolean;
+  persistCodexHomeSettings?: (
+    codexHomeMode: CodexHomeMode,
+    codexHomeOverride: string
+  ) => Promise<boolean> | boolean;
+  pickCodexHomeDirectory?: (initialPath?: string) => Promise<string | null> | string | null;
 };
 
 function SettingItem({
@@ -148,10 +185,14 @@ export function CliManagerCodexTab({
   codexInfo,
   codexConfig,
   codexConfigToml,
+  appSettings,
+  codexHomeSettingsSaving = false,
   refreshCodex,
   openCodexConfigDir,
   persistCodexConfig,
   persistCodexConfigToml,
+  persistCodexHomeSettings,
+  pickCodexHomeDirectory,
 }: CliManagerCodexTabProps) {
   const [modelText, setModelText] = useState("");
   const [contextWindowText, setContextWindowText] = useState("");
@@ -161,6 +202,10 @@ export function CliManagerCodexTab({
   const [personalityText, setPersonalityText] = useState("none");
   const [reasoningEffortText, setReasoningEffortText] = useState("");
   const [planModeReasoningEffortText, setPlanModeReasoningEffortText] = useState("");
+  const [configLocationMode, setConfigLocationMode] = useState<CodexHomeMode>("user_home_default");
+  const [customHomeText, setCustomHomeText] = useState("");
+  const [configLocationError, setConfigLocationError] = useState<string | null>(null);
+  const [selectingCodexHomeDir, setSelectingCodexHomeDir] = useState(false);
 
   const [tomlAdvancedOpen, setTomlAdvancedOpen] = useState(false);
   const [tomlEditEnabled, setTomlEditEnabled] = useState(false);
@@ -212,9 +257,20 @@ export function CliManagerCodexTab({
     setPlanModeReasoningEffortText(codexConfig.plan_mode_reasoning_effort ?? "");
   }, [codexConfig]);
 
+  useEffect(() => {
+    const savedOverride = appSettings?.codex_home_override?.trim() ?? "";
+    const savedMode =
+      appSettings?.codex_home_mode ?? (savedOverride ? "custom" : "user_home_default");
+    setConfigLocationMode(savedMode);
+    setCustomHomeText(savedOverride);
+    setConfigLocationError(null);
+  }, [appSettings?.codex_home_mode, appSettings?.codex_home_override]);
+
   const saving = codexConfigSaving;
   const loading = codexLoading || codexConfigLoading;
   const tomlBusy = codexConfigTomlLoading || codexConfigTomlSaving;
+  const configLocationBusy = saving || codexHomeSettingsSaving;
+  const configLocationControlsDisabled = configLocationBusy || selectingCodexHomeDir;
 
   // sandbox_mode 的本地 text 已由上方 codexConfig 整体同步 effect 更新，
   // 此处不再需要额外的 saving 守卫同步——之前的实现会在 saving 从
@@ -242,6 +298,111 @@ export function CliManagerCodexTab({
   const showsGpt54LinkedSettings = useMemo(() => {
     return isGpt54Model(modelText);
   }, [modelText]);
+
+  const configLocationPreviewPath = useMemo(() => {
+    return buildConfigTomlPath(customHomeText);
+  }, [customHomeText]);
+
+  const userDefaultResolvedHomeDir = useMemo(() => {
+    return codexConfig?.user_home_default_dir?.trim() || "~/.codex";
+  }, [codexConfig?.user_home_default_dir]);
+
+  const followCodexHomeResolvedDir = useMemo(() => {
+    return codexConfig?.follow_codex_home_dir?.trim() || "~/.codex";
+  }, [codexConfig?.follow_codex_home_dir]);
+
+  const followModeMatchesDefault = useMemo(() => {
+    return (
+      normalizeComparablePath(followCodexHomeResolvedDir) ===
+      normalizeComparablePath(userDefaultResolvedHomeDir)
+    );
+  }, [followCodexHomeResolvedDir, userDefaultResolvedHomeDir]);
+
+  const followModeLabel = useMemo(() => {
+    return followModeMatchesDefault
+      ? "跟随环境变量 $CODEX_HOME（当前路径与固定目录一致）"
+      : "跟随环境变量 $CODEX_HOME";
+  }, [followModeMatchesDefault]);
+
+  const configLocationBrowsePath = useMemo(() => {
+    const trimmedCustomHome = customHomeText.trim();
+    if (trimmedCustomHome) {
+      return normalizeCustomCodexHome(trimmedCustomHome);
+    }
+
+    const savedOverride = appSettings?.codex_home_override?.trim();
+    if (configLocationMode === "custom" && savedOverride) {
+      return savedOverride;
+    }
+
+    if (configLocationMode === "follow_codex_home") {
+      return codexConfig?.follow_codex_home_dir?.trim() || "";
+    }
+
+    return codexConfig?.user_home_default_dir?.trim() || "";
+  }, [
+    appSettings?.codex_home_override,
+    codexConfig?.follow_codex_home_dir,
+    codexConfig?.user_home_default_dir,
+    configLocationMode,
+    customHomeText,
+  ]);
+
+  const configLocationSummaryText = useMemo(() => {
+    if (configLocationMode === "custom") {
+      return customHomeText.trim()
+        ? "自定义模式已启用。应用会在你指定的 .codex 目录下读写 config.toml。"
+        : "自定义模式待保存。请输入一个 .codex 目录路径后按 Enter 或移出输入框保存。";
+    }
+
+    if (configLocationMode === "follow_codex_home") {
+      return `跟随模式已启用。当前将使用 ${followCodexHomeResolvedDir}；如果没有设置 $CODEX_HOME，则回退到 Windows 用户目录下的 .codex，后续也会随环境变量变化。`;
+    }
+
+    return `固定模式已启用。当前固定使用 Windows 用户目录下的 .codex：${userDefaultResolvedHomeDir}；不会跟随当前的 $CODEX_HOME。`;
+  }, [configLocationMode, customHomeText, followCodexHomeResolvedDir, userDefaultResolvedHomeDir]);
+
+  const activeConfigDirSummaryText = useMemo(() => {
+    if (configLocationMode === "custom") {
+      return "当前为手动指定目录模式。";
+    }
+
+    if (configLocationMode === "follow_codex_home") {
+      return "当前路径跟随 $CODEX_HOME 解析；后续会随环境变量变化。";
+    }
+
+    return "当前固定使用 Windows 用户目录下的 .codex。";
+  }, [configLocationMode]);
+
+  const activeConfigModeBadgeText = useMemo(() => {
+    if (configLocationMode === "custom") {
+      return "手动指定";
+    }
+
+    if (configLocationMode === "follow_codex_home") {
+      return "跟随变量";
+    }
+
+    return "固定目录";
+  }, [configLocationMode]);
+
+  const activeConfigDirPrimaryText = useMemo(() => {
+    if (configLocationMode === "custom") {
+      return customHomeText.trim() || codexConfig?.config_dir || "";
+    }
+
+    if (configLocationMode === "follow_codex_home") {
+      return followCodexHomeResolvedDir;
+    }
+
+    return userDefaultResolvedHomeDir;
+  }, [
+    codexConfig?.config_dir,
+    configLocationMode,
+    customHomeText,
+    followCodexHomeResolvedDir,
+    userDefaultResolvedHomeDir,
+  ]);
 
   useEffect(() => {
     if (!codexConfigToml) return;
@@ -281,6 +442,72 @@ export function CliManagerCodexTab({
 
     setTomlEditEnabled(false);
     setTomlDirty(false);
+  }
+
+  async function persistConfigLocation(nextMode: CodexHomeMode, nextCustomHome = customHomeText) {
+    if (!persistCodexHomeSettings) return false;
+
+    const trimmed = nextCustomHome.trim();
+    const normalized = normalizeCustomCodexHome(trimmed);
+    if (nextMode === "custom") {
+      const error = validateCustomCodexHome(trimmed);
+      setConfigLocationError(error);
+      if (error) return false;
+    } else {
+      setConfigLocationError(null);
+    }
+
+    const nextOverride = nextMode === "custom" ? normalized : "";
+    const saved = Boolean(await persistCodexHomeSettings(nextMode, nextOverride));
+    if (saved) {
+      setCustomHomeText(nextMode === "custom" ? nextOverride : "");
+    }
+    return saved;
+  }
+
+  function handleConfigLocationModeChange(nextMode: CodexHomeMode) {
+    setConfigLocationMode(nextMode);
+
+    if (nextMode !== "custom") {
+      void persistConfigLocation(nextMode, "");
+      return;
+    }
+
+    const error = validateCustomCodexHome(customHomeText);
+    setConfigLocationError(error);
+    if (!error) {
+      void persistConfigLocation("custom", customHomeText);
+    }
+  }
+
+  function resetConfigLocation() {
+    setConfigLocationMode("user_home_default");
+    setCustomHomeText("");
+    setConfigLocationError(null);
+    void persistConfigLocation("user_home_default", "");
+  }
+
+  async function handlePickCustomHome() {
+    if (!pickCodexHomeDirectory) return;
+    if (configLocationControlsDisabled) return;
+
+    setSelectingCodexHomeDir(true);
+    try {
+      const picked = await pickCodexHomeDirectory(configLocationBrowsePath || undefined);
+      if (!picked) return;
+
+      const normalized = normalizeCustomCodexHome(picked);
+      setConfigLocationMode("custom");
+      setCustomHomeText(normalized);
+
+      const error = validateCustomCodexHome(normalized);
+      setConfigLocationError(error);
+      if (!error) {
+        await persistConfigLocation("custom", normalized);
+      }
+    } finally {
+      setSelectingCodexHomeDir(false);
+    }
   }
 
   return (
@@ -332,7 +559,7 @@ export function CliManagerCodexTab({
                 <div className="bg-slate-50 dark:bg-slate-800 rounded-lg p-3 border border-slate-100 dark:border-slate-700">
                   <div className="flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400 mb-1.5">
                     <FolderOpen className="h-3 w-3" />
-                    CODEX_HOME
+                    当前 .codex 目录
                   </div>
                   <div className="flex items-center gap-1.5">
                     <div
@@ -349,16 +576,19 @@ export function CliManagerCodexTab({
                       className="shrink-0 h-6 w-6 p-0 hover:bg-slate-200 dark:hover:bg-slate-700"
                       title={
                         codexConfig.can_open_config_dir
-                          ? "打开配置目录"
-                          : "受权限限制，无法自动打开（仅允许 $HOME/.codex 下的路径）"
+                          ? "打开当前生效目录"
+                          : "受权限限制，无法自动打开该目录"
                       }
                     >
                       <ExternalLink className="h-3 w-3" />
                     </Button>
                   </div>
+                  <div className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
+                    {activeConfigDirSummaryText}
+                  </div>
                   {!codexConfig.can_open_config_dir ? (
                     <div className="mt-1 text-[11px] text-amber-700 dark:text-amber-400">
-                      受权限限制，应用仅允许打开 $HOME/.codex 下的目录；请手动打开该路径。
+                      受权限限制，无法自动打开该目录；请手动打开该路径。
                     </div>
                   ) : null}
                 </div>
@@ -410,9 +640,192 @@ export function CliManagerCodexTab({
               </div>
             )}
 
+            {codexConfig && isWindowsRuntime() ? (
+              <div className="rounded-xl border border-slate-200/80 bg-white/80 p-4 dark:border-slate-700 dark:bg-slate-900/20">
+                <div className="flex flex-col gap-4">
+                  <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                    <div className="min-w-0">
+                      <div className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+                        Windows 本机配置
+                      </div>
+                      <div className="mt-1 text-xs leading-relaxed text-slate-500 dark:text-slate-400">
+                        仅影响 Windows 本机上的 Codex 用户级{" "}
+                        <span className="font-mono">.codex</span> 目录，不改写 WSL 内各 distro 的
+                        目标路径。
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <span className="inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-medium text-slate-700 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200">
+                        {activeConfigModeBadgeText}
+                      </span>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        onClick={resetConfigLocation}
+                        disabled={
+                          configLocationControlsDisabled ||
+                          (configLocationMode === "user_home_default" &&
+                            customHomeText.trim().length === 0)
+                        }
+                      >
+                        恢复默认
+                      </Button>
+                    </div>
+                  </div>
+
+                  <div className="rounded-lg border border-slate-200/70 bg-slate-50/80 p-3 dark:border-slate-700 dark:bg-slate-800/80">
+                    <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+                      <div className="min-w-0">
+                        <div className="text-[11px] uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                          当前会使用
+                        </div>
+                        <div
+                          className="mt-1 break-all font-mono text-xs text-slate-700 dark:text-slate-300"
+                          title={activeConfigDirPrimaryText}
+                        >
+                          {activeConfigDirPrimaryText}
+                        </div>
+                        <div className="mt-1 text-[11px] leading-relaxed text-slate-500 dark:text-slate-400">
+                          {configLocationSummaryText}
+                        </div>
+                      </div>
+
+                      <div className="min-w-0 md:max-w-[320px]">
+                        <div className="text-[11px] uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                          config.toml
+                        </div>
+                        <div
+                          className="mt-1 break-all font-mono text-xs text-slate-700 dark:text-slate-300"
+                          title={codexConfig.config_path}
+                        >
+                          {codexConfig.config_path}
+                        </div>
+                        <div className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
+                          {activeConfigDirSummaryText}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="rounded-lg border border-slate-200/70 bg-white/70 p-3 dark:border-slate-700 dark:bg-slate-900/20">
+                    <div className="text-[11px] uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                      目录来源
+                    </div>
+                    <div className="mt-2">
+                      <RadioGroup
+                        name="codex_config_location_mode"
+                        value={configLocationMode}
+                        onChange={(value) =>
+                          handleConfigLocationModeChange(
+                            value === "follow_codex_home"
+                              ? "follow_codex_home"
+                              : value === "custom"
+                                ? "custom"
+                                : "user_home_default"
+                          )
+                        }
+                        options={[
+                          { value: "user_home_default", label: "固定到 Windows 用户目录" },
+                          { value: "follow_codex_home", label: followModeLabel },
+                          { value: "custom", label: "手动指定目录" },
+                        ]}
+                        disabled={configLocationControlsDisabled}
+                      />
+                    </div>
+                    <div className="mt-2 space-y-1 text-[11px] leading-relaxed text-slate-500 dark:text-slate-400">
+                      <div>
+                        固定目录：
+                        <span className="ml-1 font-mono">{userDefaultResolvedHomeDir}</span>
+                      </div>
+                      <div>
+                        <span className="font-mono">$CODEX_HOME</span> 当前解析：
+                        <span className="ml-1 font-mono">{followCodexHomeResolvedDir}</span>
+                        {followModeMatchesDefault ? (
+                          <span className="ml-2 text-amber-700 dark:text-amber-400">
+                            当前路径相同，但后续会随 $CODEX_HOME 变化。
+                          </span>
+                        ) : null}
+                      </div>
+                    </div>
+                  </div>
+
+                  {configLocationMode === "custom" ? (
+                    <div className="rounded-lg border border-slate-200/70 bg-slate-50/80 p-3 dark:border-slate-700 dark:bg-slate-800/80">
+                      <label className="text-xs font-medium text-slate-700 dark:text-slate-300">
+                        自定义 .codex 目录
+                      </label>
+
+                      <div className="mt-3 flex flex-col gap-2 lg:flex-row">
+                        <Input
+                          value={customHomeText}
+                          onChange={(e) => {
+                            const next = e.currentTarget.value;
+                            setCustomHomeText(next);
+                            if (configLocationError) {
+                              setConfigLocationError(validateCustomCodexHome(next));
+                            }
+                          }}
+                          onBlur={() => {
+                            if (configLocationMode !== "custom") return;
+                            void persistConfigLocation("custom", customHomeText);
+                          }}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") e.currentTarget.blur();
+                          }}
+                          placeholder="例如：D:\\Users\\you\\.codex"
+                          className={cn(
+                            "font-mono text-xs lg:flex-1",
+                            configLocationError &&
+                              "border-rose-300 focus-visible:ring-rose-200 dark:border-rose-700"
+                          )}
+                          disabled={configLocationControlsDisabled}
+                        />
+
+                        <div className="flex flex-wrap gap-2">
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="secondary"
+                            onClick={() => void handlePickCustomHome()}
+                            disabled={configLocationControlsDisabled}
+                          >
+                            <FolderOpen className="mr-1.5 h-3.5 w-3.5" />
+                            {selectingCodexHomeDir ? "选择中..." : "选择目录"}
+                          </Button>
+                        </div>
+                      </div>
+
+                      <div
+                        className={cn(
+                          "mt-2 text-[11px] leading-relaxed",
+                          configLocationError
+                            ? "text-rose-600 dark:text-rose-400"
+                            : "text-slate-500 dark:text-slate-400"
+                        )}
+                      >
+                        {configLocationError
+                          ? configLocationError
+                          : configLocationPreviewPath
+                            ? `保存后将使用 ${configLocationPreviewPath}。支持普通 Windows 路径、UNC 路径，也可以点“选择目录”。`
+                            : "请输入一个 .codex 目录路径，然后按 Enter、移出输入框，或直接使用目录选择器保存。"}
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="rounded-lg border border-dashed border-slate-200/80 bg-slate-50/50 px-3 py-2 text-[11px] leading-relaxed text-slate-500 dark:border-slate-700 dark:bg-slate-800/40 dark:text-slate-400">
+                      {configLocationMode === "follow_codex_home"
+                        ? `当前为跟随模式，手动目录选择器已收起；现在会使用 ${followCodexHomeResolvedDir}。`
+                        : `当前为默认模式，手动目录选择器已收起；固定使用 ${userDefaultResolvedHomeDir}。`}
+                    </div>
+                  )}
+                </div>
+              </div>
+            ) : null}
+
             <div className="text-xs text-slate-500 dark:text-slate-400">
-              注意：Codex 还会读取 Team Config（例如 repo 内 `.codex/`），其优先级可能高于
-              `$CODEX_HOME`。
+              提示：Codex 还会读取 Team Config（例如 repo 内 `.codex/`），其优先级可能高于这里的
+              用户级目录设置。
             </div>
           </div>
         </div>

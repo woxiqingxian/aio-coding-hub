@@ -1,6 +1,11 @@
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { CliManagerCodexTab } from "../CodexTab";
+import { createTestAppSettings } from "../../../../test/fixtures/settings";
+
+vi.mock("../../../../utils/platform", () => ({
+  isWindowsRuntime: () => true,
+}));
 
 function createCodexInfo(overrides: Partial<any> = {}) {
   return {
@@ -18,6 +23,10 @@ function createCodexConfig(overrides: Partial<any> = {}) {
   return {
     config_dir: "/home/user/.codex",
     config_path: "/home/user/.codex/config.toml",
+    user_home_default_dir: "C:\\Users\\MyPC\\.codex",
+    user_home_default_path: "C:\\Users\\MyPC\\.codex\\config.toml",
+    follow_codex_home_dir: "C:\\Users\\MyPC\\.codex",
+    follow_codex_home_path: "C:\\Users\\MyPC\\.codex\\config.toml",
     can_open_config_dir: true,
     exists: true,
     model: "gpt-5-codex",
@@ -42,6 +51,14 @@ function createCodexConfig(overrides: Partial<any> = {}) {
     features_multi_agent: false,
     ...overrides,
   };
+}
+
+function createAppSettings(overrides: Parameters<typeof createTestAppSettings>[0] = {}) {
+  return createTestAppSettings({
+    codex_home_mode: "user_home_default",
+    codex_home_override: "",
+    ...overrides,
+  });
 }
 
 describe("components/cli-manager/tabs/CodexTab", () => {
@@ -173,6 +190,252 @@ describe("components/cli-manager/tabs/CodexTab", () => {
       />
     );
     expect(screen.getByText("数据不可用")).toBeInTheDocument();
+  });
+
+  it("disables open config dir and shows hint when CODEX_HOME is overridden", () => {
+    render(
+      <CliManagerCodexTab
+        codexAvailable="available"
+        codexLoading={false}
+        codexConfigLoading={false}
+        codexConfigSaving={false}
+        codexConfigTomlLoading={false}
+        codexConfigTomlSaving={false}
+        codexInfo={createCodexInfo()}
+        codexConfig={createCodexConfig({
+          config_dir: "/custom/codex",
+          config_path: "/custom/codex/config.toml",
+          can_open_config_dir: false,
+        })}
+        codexConfigToml={null}
+        refreshCodex={vi.fn()}
+        openCodexConfigDir={vi.fn()}
+        persistCodexConfig={vi.fn()}
+        persistCodexConfigToml={vi.fn().mockResolvedValue(false)}
+      />
+    );
+
+    expect(
+      screen.getByText("受权限限制，无法自动打开该目录；请手动打开该路径。")
+    ).toBeInTheDocument();
+    const openBtn = screen.getByTitle("受权限限制，无法自动打开该目录");
+    expect(openBtn).toBeDisabled();
+  });
+
+  it("saves a custom codex home override and normalizes config.toml input", async () => {
+    const persistCodexHomeSettings = vi.fn().mockResolvedValue(true);
+
+    render(
+      <CliManagerCodexTab
+        codexAvailable="available"
+        codexLoading={false}
+        codexConfigLoading={false}
+        codexConfigSaving={false}
+        codexConfigTomlLoading={false}
+        codexConfigTomlSaving={false}
+        codexInfo={createCodexInfo()}
+        codexConfig={createCodexConfig()}
+        codexConfigToml={null}
+        appSettings={createAppSettings()}
+        refreshCodex={vi.fn()}
+        openCodexConfigDir={vi.fn()}
+        persistCodexConfig={vi.fn()}
+        persistCodexConfigToml={vi.fn().mockResolvedValue(false)}
+        persistCodexHomeSettings={persistCodexHomeSettings}
+        pickCodexHomeDirectory={vi.fn()}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("radio", { name: "手动指定目录" }));
+    const customCard = (await screen.findByText("自定义 .codex 目录")).closest("div");
+    expect(customCard).toBeTruthy();
+    const input = within(customCard as HTMLElement).getByRole("textbox");
+    fireEvent.change(input, { target: { value: "D:\\Work\\Codex\\config.toml" } });
+    fireEvent.blur(input);
+
+    expect(persistCodexHomeSettings).toHaveBeenCalledWith("custom", "D:\\Work\\Codex");
+    expect(
+      screen.getByText(
+        "保存后将使用 D:\\Work\\Codex\\config.toml。支持普通 Windows 路径、UNC 路径，也可以点“选择目录”。"
+      )
+    ).toBeInTheDocument();
+  });
+
+  it("shows validation for invalid custom codex home input", async () => {
+    const persistCodexHomeSettings = vi.fn().mockResolvedValue(true);
+
+    render(
+      <CliManagerCodexTab
+        codexAvailable="available"
+        codexLoading={false}
+        codexConfigLoading={false}
+        codexConfigSaving={false}
+        codexConfigTomlLoading={false}
+        codexConfigTomlSaving={false}
+        codexInfo={createCodexInfo()}
+        codexConfig={createCodexConfig()}
+        codexConfigToml={null}
+        appSettings={createAppSettings()}
+        refreshCodex={vi.fn()}
+        openCodexConfigDir={vi.fn()}
+        persistCodexConfig={vi.fn()}
+        persistCodexConfigToml={vi.fn().mockResolvedValue(false)}
+        persistCodexHomeSettings={persistCodexHomeSettings}
+        pickCodexHomeDirectory={vi.fn()}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("radio", { name: "手动指定目录" }));
+    const customCard = (await screen.findByText("自定义 .codex 目录")).closest("div");
+    expect(customCard).toBeTruthy();
+    const input = within(customCard as HTMLElement).getByRole("textbox");
+    fireEvent.change(input, { target: { value: "https://example.com/config.toml" } });
+    fireEvent.blur(input);
+
+    expect(persistCodexHomeSettings).not.toHaveBeenCalled();
+    expect(screen.getByText("这里填写的是本地目录路径，不要包含协议头。")).toBeInTheDocument();
+  });
+
+  it("uses directory picker to switch into custom mode and persist", async () => {
+    const persistCodexHomeSettings = vi.fn().mockResolvedValue(true);
+    const pickCodexHomeDirectory = vi.fn().mockResolvedValue("D:\\Users\\MyPC\\.codex");
+
+    render(
+      <CliManagerCodexTab
+        codexAvailable="available"
+        codexLoading={false}
+        codexConfigLoading={false}
+        codexConfigSaving={false}
+        codexConfigTomlLoading={false}
+        codexConfigTomlSaving={false}
+        codexInfo={createCodexInfo()}
+        codexConfig={createCodexConfig({
+          config_dir: "C:\\Users\\MyPC\\.codex",
+          config_path: "C:\\Users\\MyPC\\.codex\\config.toml",
+        })}
+        codexConfigToml={null}
+        appSettings={createAppSettings()}
+        refreshCodex={vi.fn()}
+        openCodexConfigDir={vi.fn()}
+        persistCodexConfig={vi.fn()}
+        persistCodexConfigToml={vi.fn().mockResolvedValue(false)}
+        persistCodexHomeSettings={persistCodexHomeSettings}
+        pickCodexHomeDirectory={pickCodexHomeDirectory}
+      />
+    );
+
+    expect(screen.queryByRole("button", { name: "选择目录" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByText("手动指定目录"));
+    fireEvent.click(await screen.findByRole("button", { name: "选择目录" }));
+
+    expect(pickCodexHomeDirectory).toHaveBeenCalledWith("C:\\Users\\MyPC\\.codex");
+    expect(await screen.findByDisplayValue("D:\\Users\\MyPC\\.codex")).toBeInTheDocument();
+    expect(persistCodexHomeSettings).toHaveBeenCalledWith("custom", "D:\\Users\\MyPC\\.codex");
+  });
+
+  it("switches to follow CODEX_HOME mode and disables manual selection", () => {
+    const persistCodexHomeSettings = vi.fn().mockResolvedValue(true);
+
+    render(
+      <CliManagerCodexTab
+        codexAvailable="available"
+        codexLoading={false}
+        codexConfigLoading={false}
+        codexConfigSaving={false}
+        codexConfigTomlLoading={false}
+        codexConfigTomlSaving={false}
+        codexInfo={createCodexInfo()}
+        codexConfig={createCodexConfig({
+          follow_codex_home_dir: "D:\\Workspace\\.codex",
+          follow_codex_home_path: "D:\\Workspace\\.codex\\config.toml",
+        })}
+        codexConfigToml={null}
+        appSettings={createAppSettings({ codex_home_mode: "user_home_default" })}
+        refreshCodex={vi.fn()}
+        openCodexConfigDir={vi.fn()}
+        persistCodexConfig={vi.fn()}
+        persistCodexConfigToml={vi.fn().mockResolvedValue(false)}
+        persistCodexHomeSettings={persistCodexHomeSettings}
+        pickCodexHomeDirectory={vi.fn()}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("radio", { name: "跟随环境变量 $CODEX_HOME" }));
+
+    expect(persistCodexHomeSettings).toHaveBeenCalledWith("follow_codex_home", "");
+    expect(screen.queryByRole("button", { name: "选择目录" })).not.toBeInTheDocument();
+    expect(
+      screen.getByText("当前为跟随模式，手动目录选择器已收起；现在会使用 D:\\Workspace\\.codex。")
+    ).toBeInTheDocument();
+    expect(
+      screen.getAllByText("当前路径跟随 $CODEX_HOME 解析；后续会随环境变量变化。").length
+    ).toBeGreaterThan(0);
+  });
+
+  it("labels the active directory card clearly in default mode", () => {
+    render(
+      <CliManagerCodexTab
+        codexAvailable="available"
+        codexLoading={false}
+        codexConfigLoading={false}
+        codexConfigSaving={false}
+        codexConfigTomlLoading={false}
+        codexConfigTomlSaving={false}
+        codexInfo={createCodexInfo()}
+        codexConfig={createCodexConfig({
+          config_dir: "C:\\Users\\MyPC\\.codex",
+          config_path: "C:\\Users\\MyPC\\.codex\\config.toml",
+          follow_codex_home_dir: "D:\\Workspace\\.codex",
+        })}
+        codexConfigToml={null}
+        appSettings={createAppSettings({ codex_home_mode: "user_home_default" })}
+        refreshCodex={vi.fn()}
+        openCodexConfigDir={vi.fn()}
+        persistCodexConfig={vi.fn()}
+        persistCodexConfigToml={vi.fn().mockResolvedValue(false)}
+      />
+    );
+
+    expect(screen.getByText("当前 .codex 目录")).toBeInTheDocument();
+    expect(
+      screen.getAllByText("当前固定使用 Windows 用户目录下的 .codex。").length
+    ).toBeGreaterThan(0);
+    expect(
+      screen.getByText("当前为默认模式，手动目录选择器已收起；固定使用 C:\\Users\\MyPC\\.codex。")
+    ).toBeInTheDocument();
+    expect(screen.queryByText("CODEX_HOME")).not.toBeInTheDocument();
+    expect(screen.queryByPlaceholderText("例如：D:\\Users\\you\\.codex")).not.toBeInTheDocument();
+  });
+
+  it("shows follow mode as same-as-default when both resolve to the same path", () => {
+    render(
+      <CliManagerCodexTab
+        codexAvailable="available"
+        codexLoading={false}
+        codexConfigLoading={false}
+        codexConfigSaving={false}
+        codexConfigTomlLoading={false}
+        codexConfigTomlSaving={false}
+        codexInfo={createCodexInfo()}
+        codexConfig={createCodexConfig({
+          user_home_default_dir: "C:\\Users\\MyPC\\.codex",
+          follow_codex_home_dir: "C:\\Users\\MyPC\\.codex",
+        })}
+        codexConfigToml={null}
+        appSettings={createAppSettings({ codex_home_mode: "user_home_default" })}
+        refreshCodex={vi.fn()}
+        openCodexConfigDir={vi.fn()}
+        persistCodexConfig={vi.fn()}
+        persistCodexConfigToml={vi.fn().mockResolvedValue(false)}
+      />
+    );
+
+    expect(
+      screen.getByRole("radio", {
+        name: "跟随环境变量 $CODEX_HOME（当前路径与固定目录一致）",
+      })
+    ).toBeInTheDocument();
+    expect(screen.getByText("当前路径相同，但后续会随 $CODEX_HOME 变化。")).toBeInTheDocument();
   });
 
   it("treats service_tier=fast as enabled fast mode", () => {

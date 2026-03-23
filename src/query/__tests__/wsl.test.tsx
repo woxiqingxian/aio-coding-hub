@@ -92,7 +92,18 @@ describe("query/wsl", () => {
     setTauriRuntime();
 
     vi.mocked(wslConfigStatusGet).mockResolvedValue([
-      { distro: "Ubuntu", claude: true, codex: false, gemini: true },
+      {
+        distro: "Ubuntu",
+        claude: true,
+        codex: false,
+        gemini: true,
+        claude_mcp: true,
+        codex_mcp: false,
+        gemini_mcp: true,
+        claude_prompt: true,
+        codex_prompt: false,
+        gemini_prompt: true,
+      },
     ]);
 
     const client = createTestQueryClient();
@@ -180,7 +191,18 @@ describe("query/wsl", () => {
     vi.mocked(wslDetect).mockResolvedValue({ detected: true, distros: ["Ubuntu"] });
     vi.mocked(wslHostAddressGet).mockResolvedValue("172.20.1.1");
     vi.mocked(wslConfigStatusGet).mockResolvedValue([
-      { distro: "Ubuntu", claude: true, codex: false, gemini: false },
+      {
+        distro: "Ubuntu",
+        claude: true,
+        codex: false,
+        gemini: false,
+        claude_mcp: true,
+        codex_mcp: false,
+        gemini_mcp: false,
+        claude_prompt: true,
+        codex_prompt: false,
+        gemini_prompt: false,
+      },
     ]);
 
     const client = createTestQueryClient();

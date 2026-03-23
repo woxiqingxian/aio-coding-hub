@@ -33,3 +33,31 @@ fn codex_config_toml_raw_set_refuses_invalid_input_without_writing() {
     let got = std::fs::read_to_string(&path).expect("read after failed write");
     assert_eq!(got, "approval_policy = \"on-request\"\n");
 }
+
+#[test]
+fn codex_config_toml_raw_set_uses_settings_override_directory() {
+    let app = support::TestApp::new();
+    let handle = app.handle();
+
+    let mut settings =
+        aio_coding_hub_lib::test_support::settings_get_json(&handle).expect("read defaults");
+    settings["codex_home_mode"] = serde_json::json!("custom");
+    settings["codex_home_override"] =
+        serde_json::json!(app.home_dir().join("override-codex").join("config.toml"));
+    let _ = aio_coding_hub_lib::test_support::settings_set_json(&handle, settings).expect("write");
+
+    aio_coding_hub_lib::test_support::codex_config_toml_raw_set(
+        &handle,
+        "approval_policy = \"on-request\"\n".to_string(),
+    )
+    .expect("write raw toml");
+
+    let path =
+        aio_coding_hub_lib::test_support::codex_config_toml_path(&handle).expect("codex path");
+    assert_eq!(
+        path,
+        app.home_dir().join("override-codex").join("config.toml")
+    );
+    let got = std::fs::read_to_string(&path).expect("read override config");
+    assert_eq!(got, "approval_policy = \"on-request\"\n");
+}

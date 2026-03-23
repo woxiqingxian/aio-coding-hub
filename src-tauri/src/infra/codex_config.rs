@@ -10,6 +10,10 @@ use tauri::Manager;
 pub struct CodexConfigState {
     pub config_dir: String,
     pub config_path: String,
+    pub user_home_default_dir: String,
+    pub user_home_default_path: String,
+    pub follow_codex_home_dir: String,
+    pub follow_codex_home_path: String,
     pub can_open_config_dir: bool,
     pub exists: bool,
 
@@ -868,9 +872,14 @@ fn normalize_toml_layout(lines: &mut Vec<String>) {
     *lines = out;
 }
 
+#[allow(clippy::too_many_arguments)]
 fn make_state_from_bytes(
     config_dir: String,
     config_path: String,
+    user_home_default_dir: String,
+    user_home_default_path: String,
+    follow_codex_home_dir: String,
+    follow_codex_home_path: String,
     can_open_config_dir: bool,
     bytes: Option<Vec<u8>>,
 ) -> crate::shared::error::AppResult<CodexConfigState> {
@@ -878,6 +887,10 @@ fn make_state_from_bytes(
     let mut state = CodexConfigState {
         config_dir,
         config_path,
+        user_home_default_dir,
+        user_home_default_path,
+        follow_codex_home_dir,
+        follow_codex_home_path,
         can_open_config_dir,
         exists,
 
@@ -1020,6 +1033,13 @@ pub fn codex_config_get<R: tauri::Runtime>(
 ) -> crate::shared::error::AppResult<CodexConfigState> {
     let path = codex_paths::codex_config_toml_path(app)?;
     let dir = path.parent().unwrap_or(Path::new("")).to_path_buf();
+    let user_default_path = codex_paths::codex_home_dir_user_default(app)?.join("config.toml");
+    let user_default_dir = user_default_path
+        .parent()
+        .unwrap_or(Path::new(""))
+        .to_path_buf();
+    let follow_path = codex_paths::codex_home_dir_follow_env_or_default(app)?.join("config.toml");
+    let follow_dir = follow_path.parent().unwrap_or(Path::new("")).to_path_buf();
     let bytes = read_optional_file(&path)?;
 
     let can_open_config_dir = app
@@ -1029,12 +1049,19 @@ pub fn codex_config_get<R: tauri::Runtime>(
         .map(|home| {
             let allowed_root = home.join(".codex");
             path_is_under_allowed_root(&dir, &allowed_root)
+                || codex_paths::configured_codex_home_dir(app)
+                    .as_ref()
+                    .is_some_and(|configured_dir| configured_dir == &dir)
         })
         .unwrap_or(false);
 
     make_state_from_bytes(
         dir.to_string_lossy().to_string(),
         path.to_string_lossy().to_string(),
+        user_default_dir.to_string_lossy().to_string(),
+        user_default_path.to_string_lossy().to_string(),
+        follow_dir.to_string_lossy().to_string(),
+        follow_path.to_string_lossy().to_string(),
         can_open_config_dir,
         bytes,
     )

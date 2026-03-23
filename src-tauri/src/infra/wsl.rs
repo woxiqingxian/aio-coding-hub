@@ -86,6 +86,83 @@ fn bash_single_quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', r#"'"'"'"#))
 }
 
+fn wsl_resolve_codex_home_script(var_name: &str) -> String {
+    format!(
+        r#"
+codex_home_raw="${{CODEX_HOME:-$HOME/.codex}}"
+{var_name}="$codex_home_raw"
+if [ "$codex_home_raw" = "~" ]; then
+  {var_name}="$HOME"
+elif [ "${{codex_home_raw#~/}}" != "$codex_home_raw" ]; then
+  {var_name}="$HOME/${{codex_home_raw#~/}}"
+elif [ "${{codex_home_raw#~\\}}" != "$codex_home_raw" ]; then
+  {var_name}="$HOME/${{codex_home_raw#~\\}}"
+else
+  case "$codex_home_raw" in
+    [A-Za-z]:[\\/]*)
+      if command -v wslpath >/dev/null 2>&1; then
+        {var_name}="$(wslpath -u "$codex_home_raw")"
+      else
+        drive="$(printf '%s' "$codex_home_raw" | cut -c1 | tr '[:upper:]' '[:lower:]')"
+        rest="$(printf '%s' "$codex_home_raw" | cut -c3- | sed 's#\\\\#/#g; s#^/##')"
+        {var_name}="/mnt/$drive/$rest"
+      fi
+      ;;
+    *)
+      if [ "${{codex_home_raw#/}}" = "$codex_home_raw" ]; then
+        {var_name}="$HOME/$codex_home_raw"
+      fi
+      ;;
+  esac
+fi
+if [ "$(basename -- "${{{var_name}}}")" = "config.toml" ]; then
+  {var_name}="$(dirname "${{{var_name}}}")"
+fi
+"#,
+        var_name = var_name
+    )
+}
+
+fn wsl_linux_path_to_windows_path(distro: &str, linux_path: &str) -> PathBuf {
+    if let Some(rest) = linux_path.strip_prefix("/mnt/") {
+        let mut parts = rest.splitn(2, '/');
+        if let Some(drive) = parts.next() {
+            if drive.len() == 1 && drive.chars().all(|value| value.is_ascii_alphabetic()) {
+                let mut path = format!("{}:\\", drive.to_ascii_uppercase());
+                if let Some(tail) = parts.next().filter(|value| !value.is_empty()) {
+                    path.push_str(&tail.replace('/', "\\"));
+                }
+                return PathBuf::from(path);
+            }
+        }
+    }
+
+    PathBuf::from(format!(
+        r"\\wsl$\{}{}",
+        distro,
+        linux_path.replace('/', "\\")
+    ))
+}
+
+fn resolve_wsl_codex_home_host_path(distro: &str) -> AppResult<PathBuf> {
+    let script = format!(
+        r#"
+set -euo pipefail
+HOME="$(getent passwd "$(whoami)" | cut -d: -f6)"
+export HOME
+{resolver}
+printf '%s\n' "$codex_home"
+"#,
+        resolver = wsl_resolve_codex_home_script("codex_home")
+    );
+    let resolved = run_wsl_bash_script_capture(distro, &script)?;
+    let resolved = resolved.trim();
+    if resolved.is_empty() || !resolved.starts_with('/') {
+        return Err(format!("failed to resolve CODEX_HOME in {distro}: {resolved}").into());
+    }
+    Ok(wsl_linux_path_to_windows_path(distro, resolved))
+}
+
 /// Resolve the user HOME directory inside a WSL distro, returned as a Windows UNC path.
 ///
 /// Example: distro `"Ubuntu"` → `\\wsl$\Ubuntu\home\diao`
@@ -260,7 +337,8 @@ fn read_wsl_current_values(
             );
         }
         "codex" => {
-            let codex_home = home.join(".codex");
+            let codex_home =
+                resolve_wsl_codex_home_host_path(distro).unwrap_or_else(|_| home.join(".codex"));
             // config.toml
             let toml_path = codex_home.join("config.toml");
             let toml_content = std::fs::read_to_string(&toml_path).unwrap_or_default();
@@ -393,7 +471,11 @@ fn write_file_synced(path: &std::path::Path, data: &[u8]) -> AppResult<()> {
 // ── Restore WSL clients (pure Rust via UNC paths) ──
 
 /// Restore a single CLI's config for a distro using the saved backup.
-fn restore_wsl_cli_backup(home: &std::path::Path, backup: &WslCliBackup) -> AppResult<()> {
+fn restore_wsl_cli_backup(
+    distro: &str,
+    home: &std::path::Path,
+    backup: &WslCliBackup,
+) -> AppResult<()> {
     match backup.cli_key.as_str() {
         "claude" => {
             let path = home.join(".claude").join("settings.json");
@@ -423,7 +505,8 @@ fn restore_wsl_cli_backup(home: &std::path::Path, backup: &WslCliBackup) -> AppR
             write_file_synced(&path, format!("{out}\n").as_bytes())?;
         }
         "codex" => {
-            let codex_home = home.join(".codex");
+            let codex_home =
+                resolve_wsl_codex_home_host_path(distro).unwrap_or_else(|_| home.join(".codex"));
 
             // config.toml
             let toml_path = codex_home.join("config.toml");
@@ -539,7 +622,7 @@ pub fn restore_wsl_clients(app: &tauri::AppHandle) -> AppResult<()> {
 
         let mut all_ok = true;
         for backup in &manifest.cli_backups {
-            if let Err(e) = restore_wsl_cli_backup(&home, backup) {
+            if let Err(e) = restore_wsl_cli_backup(distro, &home, backup) {
                 tracing::warn!("WSL restore failed for {} in {distro}: {e}", backup.cli_key);
                 all_ok = false;
             } else {
@@ -613,7 +696,7 @@ pub fn startup_repair_wsl_manifests(app: &tauri::AppHandle) -> AppResult<()> {
         };
 
         for backup in &manifest.cli_backups {
-            if let Err(e) = restore_wsl_cli_backup(&home, backup) {
+            if let Err(e) = restore_wsl_cli_backup(&manifest.distro, &home, backup) {
                 tracing::warn!(
                     "startup WSL restore failed for {} in {}: {e}",
                     backup.cli_key,
@@ -1241,18 +1324,14 @@ fn sync_wsl_mcp_for_cli(
 set -euo pipefail
 HOME="$(getent passwd "$(whoami)" | cut -d: -f6)"
 export HOME
-codex_home_raw="${{CODEX_HOME:-$HOME/.codex}}"
-p="$codex_home_raw"
-if [ "$codex_home_raw" = "~" ]; then p="$HOME"
-elif [ "${{codex_home_raw#~/}}" != "$codex_home_raw" ]; then p="$HOME/${{codex_home_raw#~/}}"
-elif [ "${{codex_home_raw#/}}" = "$codex_home_raw" ]; then p="$HOME/$codex_home_raw"
-fi
+{resolver}
 case {cli_key} in
   claude) echo "$HOME/.claude.json" ;;
   codex) echo "$p/config.toml" ;;
   gemini) echo "$HOME/.gemini/settings.json" ;;
 esac
 "#,
+        resolver = wsl_resolve_codex_home_script("p"),
         cli_key = bash_single_quote(cli_key)
     );
 
@@ -1286,18 +1365,14 @@ fn resolve_wsl_prompt_path(distro: &str, cli_key: &str) -> AppResult<String> {
 set -euo pipefail
 HOME="$(getent passwd "$(whoami)" | cut -d: -f6)"
 export HOME
-codex_home_raw="${{CODEX_HOME:-$HOME/.codex}}"
-p="$codex_home_raw"
-if [ "$codex_home_raw" = "~" ]; then p="$HOME"
-elif [ "${{codex_home_raw#~/}}" != "$codex_home_raw" ]; then p="$HOME/${{codex_home_raw#~/}}"
-elif [ "${{codex_home_raw#/}}" = "$codex_home_raw" ]; then p="$HOME/$codex_home_raw"
-fi
+{resolver}
 case {cli_key} in
   claude) echo "$HOME/.claude/CLAUDE.md" ;;
   codex) echo "$p/AGENTS.md" ;;
   gemini) echo "$HOME/.gemini/GEMINI.md" ;;
 esac
 "#,
+        resolver = wsl_resolve_codex_home_script("p"),
         cli_key = bash_single_quote(cli_key)
     );
     let resolved = run_wsl_bash_script_capture(distro, &resolve_script)?;
@@ -1677,17 +1752,7 @@ set -euo pipefail
 	HOME="$(getent passwd "$(whoami)" | cut -d: -f6)"
 	export HOME
 
-		codex_home_raw="${{CODEX_HOME:-$HOME/.codex}}"
-		codex_home="$codex_home_raw"
-		if [ "$codex_home_raw" = "~" ]; then
-		  codex_home="$HOME"
-		elif [ "${{codex_home_raw#~/}}" != "$codex_home_raw" ]; then
-		  codex_home="$HOME/${{codex_home_raw#~/}}"
-		elif [ "${{codex_home_raw#~\\}}" != "$codex_home_raw" ]; then
-		  codex_home="$HOME/${{codex_home_raw#~\\}}"
-		elif [ "${{codex_home_raw#/}}" = "$codex_home_raw" ]; then
-		  codex_home="$HOME/$codex_home_raw"
-		fi
+	{resolver}
 
 	mkdir -p "$codex_home"
 	config_path="$codex_home/config.toml"
@@ -1920,7 +1985,8 @@ fi
 
 echo "Failed to write $config_path" >&2
 exit 1
-"#
+"#,
+        resolver = wsl_resolve_codex_home_script("codex_home")
     );
 
     run_wsl_bash_script(distro, &script)
@@ -2093,7 +2159,8 @@ pub fn get_config_status(distros: &[String]) -> Vec<WslDistroConfigStatus> {
         return Vec::new();
     }
 
-    const STATUS_SCRIPT: &str = r#"
+    let status_script = format!(
+        r#"
 # Normalize HOME: Windows environment may inject HOME=C:\Users\...
 home_from_getent="$(getent passwd "$(whoami)" | cut -d: -f6 2>/dev/null || true)"
 if [ -n "$home_from_getent" ]; then
@@ -2113,17 +2180,7 @@ gemini_prompt=0
 
 [ -f "$HOME/.claude/settings.json" ] && claude=1
 
-CODEX_HOME_RAW="${CODEX_HOME:-$HOME/.codex}"
-p="$CODEX_HOME_RAW"
-if [ "$CODEX_HOME_RAW" = "~" ]; then
-  p="$HOME"
-elif [ "${CODEX_HOME_RAW#~/}" != "$CODEX_HOME_RAW" ]; then
-  p="$HOME/${CODEX_HOME_RAW#~/}"
-elif [ "${CODEX_HOME_RAW#~\\}" != "$CODEX_HOME_RAW" ]; then
-  p="$HOME/${CODEX_HOME_RAW#~\\}"
-elif [ "${CODEX_HOME_RAW#/}" = "$CODEX_HOME_RAW" ]; then
-  p="$HOME/$CODEX_HOME_RAW"
-fi
+{resolver}
 
 [ -f "$p/config.toml" ] && codex=1
 [ -f "$HOME/.gemini/.env" ] && gemini=1
@@ -2145,7 +2202,9 @@ fi
 [ -f "$HOME/.gemini/GEMINI.md" ] && gemini_prompt=1
 
 printf 'AIO_WSL_STATUS=%s%s%s%s%s%s%s%s%s\n' "$claude" "$codex" "$gemini" "$claude_mcp" "$codex_mcp" "$gemini_mcp" "$claude_prompt" "$codex_prompt" "$gemini_prompt"
-"#;
+"#,
+        resolver = wsl_resolve_codex_home_script("p")
+    );
 
     #[derive(Default)]
     struct StatusBits {
@@ -2198,7 +2257,7 @@ printf 'AIO_WSL_STATUS=%s%s%s%s%s%s%s%s%s\n' "$claude" "$codex" "$gemini" "$clau
 
             if let Some(mut stdin) = child.stdin.take() {
                 use std::io::Write;
-                let _ = stdin.write_all(STATUS_SCRIPT.as_bytes());
+                let _ = stdin.write_all(status_script.as_bytes());
             }
 
             let output = match child.wait_with_output() {
@@ -2548,6 +2607,22 @@ mod tests {
     #[test]
     fn test_win_path_to_wsl_mount_non_absolute() {
         assert_eq!(win_path_to_wsl_mount(r".\relative\path"), "./relative/path");
+    }
+
+    #[test]
+    fn test_wsl_linux_path_to_windows_path_for_mount_drive() {
+        assert_eq!(
+            wsl_linux_path_to_windows_path("Ubuntu", "/mnt/c/Users/test/.codex"),
+            PathBuf::from(r"C:\Users\test\.codex")
+        );
+    }
+
+    #[test]
+    fn test_wsl_linux_path_to_windows_path_for_unc_path() {
+        assert_eq!(
+            wsl_linux_path_to_windows_path("Ubuntu", "/home/test/.codex"),
+            PathBuf::from(r"\\wsl$\Ubuntu\home\test\.codex")
+        );
     }
 
     #[test]

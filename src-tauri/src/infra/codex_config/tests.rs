@@ -25,6 +25,19 @@ fn empty_patch() -> CodexConfigPatch {
     }
 }
 
+fn make_test_state(input: &str) -> crate::shared::error::AppResult<CodexConfigState> {
+    make_state_from_bytes(
+        "dir".to_string(),
+        "path".to_string(),
+        "C:\\Users\\MyPC\\.codex".to_string(),
+        "C:\\Users\\MyPC\\.codex\\config.toml".to_string(),
+        "D:\\Work\\.codex".to_string(),
+        "D:\\Work\\.codex\\config.toml".to_string(),
+        true,
+        Some(input.as_bytes().to_vec()),
+    )
+}
+
 #[test]
 fn patch_creates_features_table_and_preserves_other_tables() {
     let input = r#"# header
@@ -470,13 +483,7 @@ fn parse_reads_sandbox_mode_from_sandbox_table() {
 mode = "read-only"
 "#;
 
-    let state = make_state_from_bytes(
-        "dir".to_string(),
-        "path".to_string(),
-        true,
-        Some(input.as_bytes().to_vec()),
-    )
-    .expect("make_state_from_bytes");
+    let state = make_test_state(input).expect("make_test_state");
 
     assert_eq!(state.sandbox_mode.as_deref(), Some("read-only"));
 }
@@ -489,13 +496,7 @@ fn parse_prefers_root_sandbox_mode_over_sandbox_table() {
 mode = "read-only"
 "#;
 
-    let state = make_state_from_bytes(
-        "dir".to_string(),
-        "path".to_string(),
-        true,
-        Some(input.as_bytes().to_vec()),
-    )
-    .expect("make_state_from_bytes");
+    let state = make_test_state(input).expect("make_test_state");
 
     assert_eq!(state.sandbox_mode.as_deref(), Some("workspace-write"));
 }
@@ -508,13 +509,7 @@ fn parse_reads_service_tier_and_fast_mode() {
 fast_mode = true
 "#;
 
-    let state = make_state_from_bytes(
-        "dir".to_string(),
-        "path".to_string(),
-        true,
-        Some(input.as_bytes().to_vec()),
-    )
-    .expect("make_state_from_bytes");
+    let state = make_test_state(input).expect("make_test_state");
 
     assert_eq!(state.service_tier.as_deref(), Some("fast"));
     assert_eq!(state.features_fast_mode, Some(true));
@@ -528,13 +523,7 @@ fn parse_reads_personality_and_websocket_feature() {
 responses_websockets_v2 = true
 "#;
 
-    let state = make_state_from_bytes(
-        "dir".to_string(),
-        "path".to_string(),
-        true,
-        Some(input.as_bytes().to_vec()),
-    )
-    .expect("make_state_from_bytes");
+    let state = make_test_state(input).expect("make_test_state");
 
     assert_eq!(state.personality.as_deref(), Some("friendly"));
     assert_eq!(state.features_responses_websockets_v2, Some(true));
@@ -546,13 +535,7 @@ fn parse_reads_model_linked_limits() {
 model_auto_compact_token_limit = 900000
 "#;
 
-    let state = make_state_from_bytes(
-        "dir".to_string(),
-        "path".to_string(),
-        true,
-        Some(input.as_bytes().to_vec()),
-    )
-    .expect("make_state_from_bytes");
+    let state = make_test_state(input).expect("make_test_state");
 
     assert_eq!(state.model_context_window, Some(1_000_000));
     assert_eq!(state.model_auto_compact_token_limit, Some(900_000));
@@ -568,13 +551,7 @@ foo = "bar"
 sandbox_mode = "read-only"
 "#;
 
-    let state = make_state_from_bytes(
-        "dir".to_string(),
-        "path".to_string(),
-        true,
-        Some(input.as_bytes().to_vec()),
-    )
-    .expect("make_state_from_bytes");
+    let state = make_test_state(input).expect("make_test_state");
 
     assert_eq!(state.sandbox_mode.as_deref(), Some("read-only"));
 }

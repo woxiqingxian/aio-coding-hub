@@ -102,6 +102,10 @@ export type ClaudeSettingsPatch = Partial<{
 export type CodexConfigState = {
   config_dir: string;
   config_path: string;
+  user_home_default_dir: string;
+  user_home_default_path: string;
+  follow_codex_home_dir: string;
+  follow_codex_home_path: string;
   can_open_config_dir: boolean;
   exists: boolean;
 

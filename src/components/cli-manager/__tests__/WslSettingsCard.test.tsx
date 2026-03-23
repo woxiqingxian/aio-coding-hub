@@ -61,7 +61,20 @@ describe("components/cli-manager/WslSettingsCard", () => {
       data: {
         detection: { detected: true, distros: ["Ubuntu"] },
         hostIp: "172.20.0.1",
-        statusRows: [{ distro: "Ubuntu", claude: true, codex: false, gemini: false }],
+        statusRows: [
+          {
+            distro: "Ubuntu",
+            claude: true,
+            codex: false,
+            gemini: false,
+            claude_mcp: true,
+            codex_mcp: false,
+            gemini_mcp: false,
+            claude_prompt: true,
+            codex_prompt: false,
+            gemini_prompt: false,
+          },
+        ],
       },
       isFetched: true,
       isFetching: false,
@@ -235,8 +248,30 @@ describe("components/cli-manager/WslSettingsCard", () => {
         detection: { detected: true, distros: ["Ubuntu-22.04", "Debian"] },
         hostIp: "172.20.0.1",
         statusRows: [
-          { distro: "Ubuntu-22.04", claude: true, codex: true, gemini: true },
-          { distro: "Debian", claude: true, codex: false, gemini: true },
+          {
+            distro: "Ubuntu-22.04",
+            claude: true,
+            codex: true,
+            gemini: true,
+            claude_mcp: true,
+            codex_mcp: true,
+            gemini_mcp: true,
+            claude_prompt: true,
+            codex_prompt: true,
+            gemini_prompt: true,
+          },
+          {
+            distro: "Debian",
+            claude: true,
+            codex: false,
+            gemini: true,
+            claude_mcp: false,
+            codex_mcp: false,
+            gemini_mcp: true,
+            claude_prompt: false,
+            codex_prompt: false,
+            gemini_prompt: true,
+          },
         ],
       },
       isFetched: true,
@@ -275,6 +310,7 @@ describe("components/cli-manager/WslSettingsCard", () => {
     expect(screen.getByText("Claude")).toBeInTheDocument();
     expect(screen.getByText("Codex")).toBeInTheDocument();
     expect(screen.getByText("Gemini")).toBeInTheDocument();
+    expect(screen.getAllByTitle("Auth: yes, MCP: yes, Prompt: yes").length).toBeGreaterThan(0);
   });
 
   it("shows localhost listen mode warning", () => {
@@ -466,8 +502,30 @@ describe("components/cli-manager/WslSettingsCard", () => {
         detection: { detected: true, distros: ["Ubuntu", "Debian"] },
         hostIp: null,
         statusRows: [
-          { distro: "Ubuntu", claude: true, codex: true, gemini: true },
-          { distro: "Debian", claude: false, codex: false, gemini: false },
+          {
+            distro: "Ubuntu",
+            claude: true,
+            codex: true,
+            gemini: true,
+            claude_mcp: true,
+            codex_mcp: true,
+            gemini_mcp: true,
+            claude_prompt: true,
+            codex_prompt: true,
+            gemini_prompt: true,
+          },
+          {
+            distro: "Debian",
+            claude: false,
+            codex: false,
+            gemini: false,
+            claude_mcp: false,
+            codex_mcp: false,
+            gemini_mcp: false,
+            claude_prompt: false,
+            codex_prompt: false,
+            gemini_prompt: false,
+          },
         ],
       },
       isFetched: true,

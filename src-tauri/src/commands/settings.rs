@@ -43,6 +43,8 @@ pub(crate) struct SettingsUpdate {
     pub wsl_target_cli: Option<settings::WslTargetCli>,
     pub wsl_host_address_mode: Option<settings::WslHostAddressMode>,
     pub wsl_custom_host_address: Option<String>,
+    pub codex_home_mode: Option<settings::CodexHomeMode>,
+    pub codex_home_override: Option<String>,
 }
 
 #[tauri::command]
@@ -96,6 +98,8 @@ pub(crate) async fn settings_set(
         wsl_target_cli,
         wsl_host_address_mode,
         wsl_custom_host_address,
+        codex_home_mode,
+        codex_home_override,
     } = update;
 
     // Capture WSL-related update flags before values are moved into the closure
@@ -106,7 +110,9 @@ pub(crate) async fn settings_set(
         || gateway_custom_listen_address.is_some()
         || wsl_target_cli.is_some()
         || wsl_host_address_mode.is_some()
-        || wsl_custom_host_address.is_some();
+        || wsl_custom_host_address.is_some()
+        || codex_home_mode.is_some()
+        || codex_home_override.is_some();
 
     let app_for_work = app.clone();
     let next_settings = blocking::run(
@@ -134,6 +140,11 @@ pub(crate) async fn settings_set(
                 wsl_host_address_mode.unwrap_or(previous.wsl_host_address_mode);
             let wsl_custom_host_address = wsl_custom_host_address
                 .unwrap_or(previous.wsl_custom_host_address)
+                .trim()
+                .to_string();
+            let codex_home_mode = codex_home_mode.unwrap_or(previous.codex_home_mode);
+            let codex_home_override = codex_home_override
+                .unwrap_or(previous.codex_home_override)
                 .trim()
                 .to_string();
             let provider_base_url_ping_cache_ttl_seconds = provider_base_url_ping_cache_ttl_seconds
@@ -209,6 +220,8 @@ pub(crate) async fn settings_set(
                 wsl_target_cli,
                 wsl_host_address_mode,
                 wsl_custom_host_address,
+                codex_home_mode,
+                codex_home_override,
                 auto_start: next_auto_start,
                 start_minimized,
                 tray_enabled,

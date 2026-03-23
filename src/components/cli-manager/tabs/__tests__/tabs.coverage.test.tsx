@@ -85,6 +85,10 @@ describe("cli-manager tabs (coverage)", () => {
         codexConfig={{
           config_dir: "/tmp/.codex",
           config_path: "/tmp/.codex/config.toml",
+          user_home_default_dir: "C:\\Users\\MyPC\\.codex",
+          user_home_default_path: "C:\\Users\\MyPC\\.codex\\config.toml",
+          follow_codex_home_dir: "C:\\Users\\MyPC\\.codex",
+          follow_codex_home_path: "C:\\Users\\MyPC\\.codex\\config.toml",
           can_open_config_dir: true,
           exists: true,
           model: "gpt-5.4",
@@ -120,7 +124,7 @@ describe("cli-manager tabs (coverage)", () => {
       />
     );
 
-    expect(screen.getByText("config.toml")).toBeInTheDocument();
+    expect(screen.getAllByText("config.toml").length).toBeGreaterThan(0);
   });
 
   it("renders GeminiTab", () => {

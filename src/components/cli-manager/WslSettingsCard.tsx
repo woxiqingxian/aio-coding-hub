@@ -15,6 +15,7 @@ import { Switch } from "../../ui/Switch";
 import { Button } from "../../ui/Button";
 import { cn } from "../../utils/cn";
 import { Boxes, RefreshCw, Info } from "lucide-react";
+import { buildConfigTomlPath } from "../../utils/codexPaths";
 
 export type WslSettingsCardProps = {
   available: boolean;
@@ -43,6 +44,15 @@ export function WslSettingsCard({ available, saving, settings }: WslSettingsCard
   const checkedOnce = wslOverviewQuery.isFetched;
   const loading = wslOverviewQuery.isFetching;
   const configuring = wslConfigureMutation.isPending;
+  const codexWslSyncEnabled = settings.wsl_target_cli?.codex ?? false;
+  const codexHomeMode = settings.codex_home_mode;
+  const codexHomeOverride = settings.codex_home_override?.trim() ?? "";
+  const codexHostConfigPath =
+    codexHomeMode === "custom" && codexHomeOverride
+      ? buildConfigTomlPath(codexHomeOverride)
+      : codexHomeMode === "follow_codex_home"
+        ? "跟随 Windows 侧 $CODEX_HOME（未设置时回退到当前用户 ~/.codex/config.toml）"
+        : "固定使用 Windows 当前用户目录 ~/.codex/config.toml";
 
   const [lastReport, setLastReport] = useState<WslConfigureReport | null>(null);
   const [showListenModeDialog, setShowListenModeDialog] = useState(false);
@@ -453,11 +463,35 @@ export function WslSettingsCard({ available, saving, settings }: WslSettingsCard
             ) : null}
           </div>
 
+          <div className="mt-3 rounded-lg border border-slate-200/70 bg-slate-50/70 p-3 dark:border-slate-700 dark:bg-slate-800/40">
+            <div className="text-sm font-medium text-slate-700 dark:text-slate-300">
+              WSL 中的 Codex 同步目标
+            </div>
+            <div className="mt-2 font-mono text-xs text-slate-700 dark:text-slate-300 break-all">
+              $CODEX_HOME/config.toml
+            </div>
+            <div className="mt-1 text-[11px] leading-relaxed text-slate-500 dark:text-slate-400">
+              {codexWslSyncEnabled
+                ? "已纳入 WSL 自动同步。同步时，每个 distro 都会在自己的环境里独立解析 $CODEX_HOME/config.toml；如果没有设置，则回退到 ~/.codex/config.toml。"
+                : "当前未启用 Codex 的 WSL 自动同步。若后续启用，目标仍然是每个 distro 内独立解析出的 $CODEX_HOME/config.toml（未设置时回退到 ~/.codex/config.toml）。"}
+            </div>
+            <div className="mt-1 text-[11px] leading-relaxed text-slate-500 dark:text-slate-400">
+              仅 Windows 本机当前
+              {codexHomeMode === "custom"
+                ? "使用自定义位置"
+                : codexHomeMode === "follow_codex_home"
+                  ? "跟随 Windows 侧 $CODEX_HOME"
+                  : "固定使用 Windows 当前用户目录"}
+              ：<span className="ml-1 font-mono break-all">{codexHostConfigPath}</span>
+              。这只影响 Windows 本机，不会覆盖 WSL 内的目标路径。
+            </div>
+          </div>
+
           <div className="mt-3 flex items-center justify-between gap-3">
             <div className="text-xs text-slate-500 dark:text-slate-400">
               {statusRows ? (
                 <span>
-                  已检测配置文件：
+                  已检测到至少一个 CLI 已配置：
                   {statusRows.filter((r) => r.claude || r.codex || r.gemini).length}/
                   {statusRows.length} 个 distro
                 </span>

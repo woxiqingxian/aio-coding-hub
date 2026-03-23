@@ -2,6 +2,10 @@
 
 use std::path::PathBuf;
 
+pub fn clear_settings_cache() {
+    crate::settings::clear_cache();
+}
+
 fn serialize_json(
     value: impl serde::Serialize,
 ) -> crate::shared::error::AppResult<serde_json::Value> {
@@ -157,6 +161,18 @@ pub fn codex_config_toml_path<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
 ) -> crate::shared::error::AppResult<PathBuf> {
     crate::infra::codex_paths::codex_config_toml_path(app)
+}
+
+pub fn codex_home_dir_follow_env_or_default<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+) -> crate::shared::error::AppResult<PathBuf> {
+    crate::infra::codex_paths::codex_home_dir_follow_env_or_default(app)
+}
+
+pub fn codex_home_dir_user_default<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+) -> crate::shared::error::AppResult<PathBuf> {
+    crate::infra::codex_paths::codex_home_dir_user_default(app)
 }
 
 pub fn codex_config_toml_raw_set<R: tauri::Runtime>(

@@ -17,6 +17,8 @@ export function createTestAppSettings(overrides?: Partial<AppSettings>): AppSett
     wsl_target_cli: { claude: true, codex: true, gemini: true },
     wsl_host_address_mode: "auto",
     wsl_custom_host_address: "127.0.0.1",
+    codex_home_mode: "user_home_default",
+    codex_home_override: "",
     auto_start: false,
     start_minimized: false,
     tray_enabled: true,

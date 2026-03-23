@@ -4,7 +4,7 @@ import { MemoryRouter } from "react-router-dom";
 import { describe, expect, it, vi } from "vitest";
 import type { ReactElement } from "react";
 import { toast } from "sonner";
-import { tauriOpenPath } from "../../test/mocks/tauri";
+import { tauriDialogOpen, tauriOpenPath } from "../../test/mocks/tauri";
 import { createTestQueryClient } from "../../test/utils/reactQuery";
 import { CliManagerPage } from "../CliManagerPage";
 import { logToConsole } from "../../services/consoleLog";
@@ -92,7 +92,12 @@ vi.mock("../../components/cli-manager/tabs/ClaudeTab", () => ({
 }));
 
 vi.mock("../../components/cli-manager/tabs/CodexTab", () => ({
-  CliManagerCodexTab: ({ refreshCodex, openCodexConfigDir, persistCodexConfig }: any) => (
+  CliManagerCodexTab: ({
+    refreshCodex,
+    openCodexConfigDir,
+    persistCodexConfig,
+    pickCodexHomeDirectory,
+  }: any) => (
     <div>
       <div>codex-tab</div>
       <button type="button" onClick={() => refreshCodex()}>
@@ -100,6 +105,9 @@ vi.mock("../../components/cli-manager/tabs/CodexTab", () => ({
       </button>
       <button type="button" onClick={() => openCodexConfigDir()}>
         open-codex-dir
+      </button>
+      <button type="button" onClick={() => pickCodexHomeDirectory?.()}>
+        pick-codex-dir
       </button>
       <button type="button" onClick={() => persistCodexConfig({ foo: "bar" })}>
         save-codex
@@ -188,6 +196,8 @@ function createAppSettings(overrides: Partial<any> = {}) {
     enable_circuit_breaker_notice: false,
     enable_codex_session_id_completion: true,
     enable_claude_metadata_user_id_injection: true,
+    codex_home_mode: "user_home_default",
+    codex_home_override: "",
     ...overrides,
   };
 }
@@ -426,8 +436,19 @@ describe("pages/CliManagerPage", () => {
     expect(await screen.findByText("codex-tab")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "open-codex-dir" }));
-    expect(toast).toHaveBeenCalledWith(
-      "受权限限制，无法自动打开该目录（仅允许 $HOME/.codex 下的路径）"
+    expect(toast).toHaveBeenCalledWith("受权限限制，无法自动打开该目录");
+
+    vi.mocked(tauriDialogOpen).mockResolvedValueOnce("/codex-picked");
+    fireEvent.click(screen.getByRole("button", { name: "pick-codex-dir" }));
+    await waitFor(() =>
+      expect(tauriDialogOpen).toHaveBeenCalledWith(
+        expect.objectContaining({
+          directory: true,
+          multiple: false,
+          title: "选择 Codex .codex 目录",
+          defaultPath: "/codex",
+        })
+      )
     );
 
     // enable open dir and retry (error branch)

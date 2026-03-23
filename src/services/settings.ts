@@ -3,6 +3,7 @@ import { invokeService } from "./invokeServiceCommand";
 export type GatewayListenMode = "localhost" | "wsl_auto" | "lan" | "custom";
 
 export type WslHostAddressMode = "auto" | "custom";
+export type CodexHomeMode = "user_home_default" | "follow_codex_home" | "custom";
 export type HomeUsagePeriod = "last7" | "last15" | "last30" | "month";
 
 export type WslTargetCli = {
@@ -23,6 +24,8 @@ export type AppSettings = {
   wsl_target_cli: WslTargetCli;
   wsl_host_address_mode: WslHostAddressMode;
   wsl_custom_host_address: string;
+  codex_home_mode: CodexHomeMode;
+  codex_home_override: string;
   auto_start: boolean;
   start_minimized: boolean;
   tray_enabled: boolean;
@@ -92,6 +95,8 @@ export type SettingsSetInput = {
   wslTargetCli?: WslTargetCli;
   wslHostAddressMode?: WslHostAddressMode;
   wslCustomHostAddress?: string;
+  codexHomeMode?: CodexHomeMode;
+  codexHomeOverride?: string;
 };
 
 export async function settingsGet() {

@@ -7,6 +7,7 @@ import {
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
+import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { openPath } from "@tauri-apps/plugin-opener";
 import { toast } from "sonner";
 import { type ClaudeSettingsPatch, type CodexConfigPatch } from "../services/cliManager";
@@ -350,6 +351,8 @@ export function CliManagerPage() {
         circuitBreakerOpenDurationMinutes: next.circuit_breaker_open_duration_minutes,
         wslAutoConfig: next.wsl_auto_config,
         wslTargetCli: next.wsl_target_cli,
+        codexHomeMode: next.codex_home_mode,
+        codexHomeOverride: next.codex_home_override,
       });
 
       if (!updated) {
@@ -397,6 +400,48 @@ export function CliManagerPage() {
 
   async function refreshGeminiInfo() {
     await geminiInfoQuery.refetch();
+  }
+
+  async function persistCodexHomeSettings(
+    codexHomeMode: AppSettings["codex_home_mode"],
+    codexHomeOverride: string
+  ) {
+    const updated = await persistCommonSettings({
+      codex_home_mode: codexHomeMode,
+      codex_home_override: codexHomeOverride,
+    });
+    if (!updated) {
+      return false;
+    }
+
+    await refreshCodex();
+    return true;
+  }
+
+  async function pickCodexHomeDirectory(initialPath?: string): Promise<string | null> {
+    try {
+      const selected = await openDialog({
+        directory: true,
+        multiple: false,
+        title: "选择 Codex .codex 目录",
+        defaultPath:
+          initialPath ||
+          codexConfig?.user_home_default_dir ||
+          codexConfig?.follow_codex_home_dir ||
+          codexConfig?.config_dir ||
+          undefined,
+      });
+
+      if (!selected) {
+        return null;
+      }
+
+      return Array.isArray(selected) ? (selected[0] ?? null) : selected;
+    } catch (err) {
+      logToConsole("error", "打开 Codex 目录选择器失败", { error: String(err) });
+      toast("打开目录选择器失败：请稍后重试");
+      return null;
+    }
   }
 
   async function persistCodexConfig(patch: CodexConfigPatch) {
@@ -472,7 +517,7 @@ export function CliManagerPage() {
   async function openCodexConfigDir() {
     if (!codexConfig) return;
     if (!codexConfig.can_open_config_dir) {
-      toast("受权限限制，无法自动打开该目录（仅允许 $HOME/.codex 下的路径）");
+      toast("受权限限制，无法自动打开该目录");
       return;
     }
     try {
@@ -566,10 +611,14 @@ export function CliManagerPage() {
               codexInfo={codexInfo}
               codexConfig={codexConfig}
               codexConfigToml={codexConfigToml}
+              appSettings={appSettings}
+              codexHomeSettingsSaving={commonSettingsSaving}
               refreshCodex={refreshCodex}
               openCodexConfigDir={openCodexConfigDir}
               persistCodexConfig={persistCodexConfig}
               persistCodexConfigToml={persistCodexConfigToml}
+              persistCodexHomeSettings={persistCodexHomeSettings}
+              pickCodexHomeDirectory={pickCodexHomeDirectory}
             />
           </Suspense>
         ) : null}

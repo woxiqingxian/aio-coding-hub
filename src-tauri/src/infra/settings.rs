@@ -9,7 +9,7 @@ use std::sync::{OnceLock, RwLock};
 use std::time::{Duration, Instant};
 use tauri::Manager;
 
-pub const SCHEMA_VERSION: u32 = 22;
+pub const SCHEMA_VERSION: u32 = 24;
 const SCHEMA_VERSION_DISABLE_UPSTREAM_TIMEOUTS: u32 = 7;
 const SCHEMA_VERSION_ADD_GATEWAY_RECTIFIERS: u32 = 8;
 const SCHEMA_VERSION_ADD_CIRCUIT_BREAKER_NOTICE: u32 = 9;
@@ -26,6 +26,8 @@ const SCHEMA_VERSION_ADD_START_MINIMIZED: u32 = 19;
 const SCHEMA_VERSION_ADD_SHOW_HOME_HEATMAP: u32 = 20;
 const SCHEMA_VERSION_ADD_HOME_USAGE_PERIOD: u32 = 21;
 const SCHEMA_VERSION_ADD_SHOW_HOME_USAGE: u32 = 22;
+const SCHEMA_VERSION_ADD_CODEX_HOME_OVERRIDE: u32 = 23;
+const SCHEMA_VERSION_ADD_CODEX_HOME_MODE: u32 = 24;
 pub const DEFAULT_GATEWAY_PORT: u16 = 37123;
 pub const MAX_GATEWAY_PORT: u16 = 37199;
 const DEFAULT_LOG_RETENTION_DAYS: u32 = 7;
@@ -125,6 +127,20 @@ impl Default for HomeUsagePeriod {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "snake_case")]
+pub enum CodexHomeMode {
+    UserHomeDefault,
+    FollowCodexHome,
+    Custom,
+}
+
+impl Default for CodexHomeMode {
+    fn default() -> Self {
+        Self::UserHomeDefault
+    }
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, specta::Type)]
 #[serde(default)]
 pub struct WslTargetCli {
@@ -164,6 +180,10 @@ pub struct AppSettings {
     // WSL host address mode (auto-detect or custom) and custom address.
     pub wsl_host_address_mode: WslHostAddressMode,
     pub wsl_custom_host_address: String,
+    // Windows-side Codex config location mode.
+    pub codex_home_mode: CodexHomeMode,
+    // Optional Codex config directory override. Empty = default resolution.
+    pub codex_home_override: String,
     pub auto_start: bool,
     // Start with window hidden when auto-starting (silent startup).
     pub start_minimized: bool,
@@ -219,6 +239,8 @@ impl Default for AppSettings {
             wsl_target_cli: WslTargetCli::default(),
             wsl_host_address_mode: WslHostAddressMode::Auto,
             wsl_custom_host_address: "127.0.0.1".to_string(),
+            codex_home_mode: CodexHomeMode::default(),
+            codex_home_override: String::new(),
             auto_start: false,
             start_minimized: false,
             tray_enabled: true,
@@ -262,6 +284,56 @@ fn default_show_home_heatmap() -> bool {
 
 fn default_show_home_usage() -> bool {
     DEFAULT_SHOW_HOME_USAGE
+}
+
+fn normalize_codex_home_override(raw: &str) -> String {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return String::new();
+    }
+
+    // Strip trailing config.toml (case-insensitive) regardless of separator
+    // style, since the value may contain Windows backslashes even on non-Windows
+    // hosts (the setting is always about a Windows-side path).
+    let stripped = trimmed
+        .strip_suffix("config.toml")
+        .or_else(|| trimmed.strip_suffix("config.TOML"))
+        .or_else(|| trimmed.strip_suffix("Config.toml"))
+        .or_else(|| {
+            let lower = trimmed.to_ascii_lowercase();
+            if lower.ends_with("config.toml") {
+                Some(&trimmed[..trimmed.len() - "config.toml".len()])
+            } else {
+                None
+            }
+        })
+        .unwrap_or(trimmed);
+
+    let stripped = stripped.trim_end_matches(['/', '\\']);
+    if stripped.is_empty() {
+        return trimmed.to_string();
+    }
+    stripped.to_string()
+}
+
+fn sanitize_codex_home_override(settings: &mut AppSettings) -> bool {
+    let normalized = normalize_codex_home_override(&settings.codex_home_override);
+    let mut changed = settings.codex_home_override != normalized;
+    settings.codex_home_override = normalized;
+
+    if settings.codex_home_mode != CodexHomeMode::Custom && !settings.codex_home_override.is_empty()
+    {
+        settings.codex_home_override.clear();
+        changed = true;
+    }
+
+    if settings.codex_home_mode == CodexHomeMode::Custom && settings.codex_home_override.is_empty()
+    {
+        settings.codex_home_mode = CodexHomeMode::UserHomeDefault;
+        changed = true;
+    }
+
+    changed
 }
 
 fn sanitize_failover_settings(settings: &mut AppSettings) -> bool {
@@ -628,11 +700,44 @@ fn migrate_add_show_home_usage(settings: &mut AppSettings, schema_version_presen
     )
 }
 
-fn settings_path(app: &tauri::AppHandle) -> AppResult<PathBuf> {
+fn migrate_add_codex_home_override(
+    settings: &mut AppSettings,
+    schema_version_present: bool,
+) -> bool {
+    // v23: Add persisted Codex config directory override (default empty = use default resolution).
+    migrate_bump_schema_version(
+        settings,
+        schema_version_present,
+        SCHEMA_VERSION_ADD_CODEX_HOME_OVERRIDE,
+    )
+}
+
+fn migrate_add_codex_home_mode(settings: &mut AppSettings, schema_version_present: bool) -> bool {
+    // v24: Split Codex home resolution into explicit user-home default / follow CODEX_HOME / custom.
+    let needs_mode_default =
+        !schema_version_present || settings.schema_version < SCHEMA_VERSION_ADD_CODEX_HOME_MODE;
+    let changed = migrate_bump_schema_version(
+        settings,
+        schema_version_present,
+        SCHEMA_VERSION_ADD_CODEX_HOME_MODE,
+    );
+
+    if needs_mode_default {
+        settings.codex_home_mode = if settings.codex_home_override.trim().is_empty() {
+            CodexHomeMode::UserHomeDefault
+        } else {
+            CodexHomeMode::Custom
+        };
+    }
+
+    changed
+}
+
+fn settings_path<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> AppResult<PathBuf> {
     Ok(app_paths::app_data_dir(app)?.join("settings.json"))
 }
 
-fn legacy_settings_path(app: &tauri::AppHandle) -> AppResult<PathBuf> {
+fn legacy_settings_path<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> AppResult<PathBuf> {
     let config_dir = app
         .path()
         .config_dir()
@@ -692,7 +797,7 @@ fn canonical_settings_json(settings: &AppSettings) -> AppResult<serde_json::Valu
     Ok(serde_json::Value::Object(compact))
 }
 
-pub fn read(app: &tauri::AppHandle) -> AppResult<AppSettings> {
+pub fn read<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> AppResult<AppSettings> {
     let cache = SETTINGS_CACHE.get_or_init(|| RwLock::new(None));
 
     if let Ok(guard) = cache.read() {
@@ -750,12 +855,15 @@ pub fn read(app: &tauri::AppHandle) -> AppResult<AppSettings> {
             repaired |= migrate_add_show_home_heatmap(&mut settings, schema_version_present);
             repaired |= migrate_add_home_usage_period(&mut settings, schema_version_present);
             repaired |= migrate_add_show_home_usage(&mut settings, schema_version_present);
+            repaired |= migrate_add_codex_home_override(&mut settings, schema_version_present);
+            repaired |= migrate_add_codex_home_mode(&mut settings, schema_version_present);
             repaired |= sanitize_failover_settings(&mut settings);
             repaired |= sanitize_circuit_breaker_settings(&mut settings);
             repaired |= sanitize_provider_cooldown_seconds(&mut settings);
             repaired |= sanitize_provider_base_url_ping_cache_ttl_seconds(&mut settings);
             repaired |= sanitize_upstream_timeouts(&mut settings);
             repaired |= sanitize_response_fixer_limits(&mut settings);
+            repaired |= sanitize_codex_home_override(&mut settings);
             let canonical = canonical_settings_json(&settings)?;
             repaired |= raw_settings_json != canonical;
             if repaired {
@@ -821,12 +929,15 @@ pub fn read(app: &tauri::AppHandle) -> AppResult<AppSettings> {
     repaired |= migrate_add_show_home_heatmap(&mut settings, schema_version_present);
     repaired |= migrate_add_home_usage_period(&mut settings, schema_version_present);
     repaired |= migrate_add_show_home_usage(&mut settings, schema_version_present);
+    repaired |= migrate_add_codex_home_override(&mut settings, schema_version_present);
+    repaired |= migrate_add_codex_home_mode(&mut settings, schema_version_present);
     repaired |= sanitize_failover_settings(&mut settings);
     repaired |= sanitize_circuit_breaker_settings(&mut settings);
     repaired |= sanitize_provider_cooldown_seconds(&mut settings);
     repaired |= sanitize_provider_base_url_ping_cache_ttl_seconds(&mut settings);
     repaired |= sanitize_upstream_timeouts(&mut settings);
     repaired |= sanitize_response_fixer_limits(&mut settings);
+    repaired |= sanitize_codex_home_override(&mut settings);
     let canonical = canonical_settings_json(&settings)?;
     repaired |= raw_settings_json != canonical;
     if repaired {
@@ -844,7 +955,7 @@ pub fn read(app: &tauri::AppHandle) -> AppResult<AppSettings> {
     Ok(settings)
 }
 
-pub fn log_retention_days_fail_open(app: &tauri::AppHandle) -> u32 {
+pub fn log_retention_days_fail_open<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> u32 {
     match read(app) {
         Ok(cfg) => cfg.log_retention_days,
         Err(err) => {
@@ -860,7 +971,20 @@ pub fn log_retention_days_fail_open(app: &tauri::AppHandle) -> u32 {
     }
 }
 
-pub fn write(app: &tauri::AppHandle, settings: &AppSettings) -> AppResult<AppSettings> {
+pub fn write<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    settings: &AppSettings,
+) -> AppResult<AppSettings> {
+    let mut settings = settings.clone();
+    settings.codex_home_override = normalize_codex_home_override(&settings.codex_home_override);
+    if settings.codex_home_mode != CodexHomeMode::Custom {
+        settings.codex_home_override.clear();
+    }
+    if settings.codex_home_mode == CodexHomeMode::Custom && settings.codex_home_override.is_empty()
+    {
+        settings.codex_home_mode = CodexHomeMode::UserHomeDefault;
+    }
+
     if settings.preferred_port < 1024 {
         return Err("SEC_INVALID_INPUT: preferred_port must be between 1024 and 65535".into());
     }
@@ -980,7 +1104,7 @@ pub fn write(app: &tauri::AppHandle, settings: &AppSettings) -> AppResult<AppSet
     let tmp_path = path.with_file_name("settings.json.tmp");
     let backup_path = path.with_file_name("settings.json.bak");
 
-    let canonical = canonical_settings_json(settings)?;
+    let canonical = canonical_settings_json(&settings)?;
     let content = serde_json::to_vec_pretty(&canonical)
         .map_err(|e| format!("failed to serialize settings: {e}"))?;
 
@@ -1013,7 +1137,16 @@ pub fn write(app: &tauri::AppHandle, settings: &AppSettings) -> AppResult<AppSet
         });
     }
 
-    Ok(settings.clone())
+    Ok(settings)
+}
+
+/// Clear the in-process settings cache.  Only available for integration tests
+/// where each `TestApp` uses a distinct temp directory.
+pub fn clear_cache() {
+    let cache = SETTINGS_CACHE.get_or_init(|| RwLock::new(None));
+    if let Ok(mut guard) = cache.write() {
+        *guard = None;
+    }
 }
 
 #[cfg(test)]
@@ -1425,6 +1558,18 @@ mod tests {
     }
 
     #[test]
+    fn app_settings_default_has_empty_codex_home_override() {
+        let s = AppSettings::default();
+        assert!(s.codex_home_override.is_empty());
+    }
+
+    #[test]
+    fn app_settings_default_uses_user_home_default_codex_mode() {
+        let s = AppSettings::default();
+        assert_eq!(s.codex_home_mode, CodexHomeMode::UserHomeDefault);
+    }
+
+    #[test]
     fn app_settings_default_uses_last15_home_usage_period() {
         let s = AppSettings::default();
         assert_eq!(s.home_usage_period, HomeUsagePeriod::Last15);
@@ -1484,5 +1629,88 @@ mod tests {
         };
         assert!(migrate_add_show_home_usage(&mut s, true));
         assert_eq!(s.schema_version, SCHEMA_VERSION_ADD_SHOW_HOME_USAGE);
+    }
+
+    #[test]
+    fn migrate_add_codex_home_override_bumps_schema_version() {
+        let mut s = AppSettings {
+            schema_version: 22,
+            ..Default::default()
+        };
+        assert!(migrate_add_codex_home_override(&mut s, true));
+        assert_eq!(s.schema_version, SCHEMA_VERSION_ADD_CODEX_HOME_OVERRIDE);
+    }
+
+    #[test]
+    fn migrate_add_codex_home_mode_bumps_schema_version_and_defaults_to_user_home() {
+        let mut s = AppSettings {
+            schema_version: 23,
+            ..Default::default()
+        };
+        assert!(migrate_add_codex_home_mode(&mut s, true));
+        assert_eq!(s.schema_version, SCHEMA_VERSION_ADD_CODEX_HOME_MODE);
+        assert_eq!(s.codex_home_mode, CodexHomeMode::UserHomeDefault);
+    }
+
+    #[test]
+    fn migrate_add_codex_home_mode_preserves_legacy_custom_override_as_custom_mode() {
+        let mut s = AppSettings {
+            schema_version: 23,
+            codex_home_override: r"D:\Work\.codex".to_string(),
+            ..Default::default()
+        };
+        assert!(migrate_add_codex_home_mode(&mut s, true));
+        assert_eq!(s.codex_home_mode, CodexHomeMode::Custom);
+    }
+
+    #[test]
+    fn normalize_codex_home_override_keeps_directory_input() {
+        assert_eq!(
+            normalize_codex_home_override(r"  C:\Users\me\.codex  "),
+            r"C:\Users\me\.codex"
+        );
+    }
+
+    #[test]
+    fn normalize_codex_home_override_converts_config_toml_to_parent_dir() {
+        assert_eq!(
+            normalize_codex_home_override(r"C:\Users\me\.codex\config.toml"),
+            r"C:\Users\me\.codex"
+        );
+    }
+
+    #[test]
+    fn sanitize_codex_home_override_trims_and_normalizes() {
+        let mut s = AppSettings {
+            codex_home_mode: CodexHomeMode::Custom,
+            codex_home_override: " ~/.codex/config.toml ".to_string(),
+            ..Default::default()
+        };
+        assert!(sanitize_codex_home_override(&mut s));
+        assert_eq!(s.codex_home_override, "~/.codex");
+    }
+
+    #[test]
+    fn sanitize_codex_home_override_demotes_empty_custom_mode_to_user_home_default() {
+        let mut s = AppSettings {
+            codex_home_mode: CodexHomeMode::Custom,
+            codex_home_override: "   ".to_string(),
+            ..Default::default()
+        };
+        assert!(sanitize_codex_home_override(&mut s));
+        assert_eq!(s.codex_home_mode, CodexHomeMode::UserHomeDefault);
+        assert!(s.codex_home_override.is_empty());
+    }
+
+    #[test]
+    fn sanitize_codex_home_override_clears_override_when_mode_is_not_custom() {
+        let mut s = AppSettings {
+            codex_home_mode: CodexHomeMode::FollowCodexHome,
+            codex_home_override: r"D:\Work\.codex".to_string(),
+            ..Default::default()
+        };
+        assert!(sanitize_codex_home_override(&mut s));
+        assert_eq!(s.codex_home_mode, CodexHomeMode::FollowCodexHome);
+        assert!(s.codex_home_override.is_empty());
     }
 }

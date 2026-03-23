@@ -74,7 +74,8 @@ describe("services/settings", () => {
       circuitBreakerOpenDurationMinutes: 30,
       wslAutoConfig: true,
       wslTargetCli: { claude: true, codex: false, gemini: true },
-    });
+      codexHomeOverride: "D:\\CodexHome",
+    } as any);
 
     expect(tauriInvoke).toHaveBeenCalledWith(
       "settings_set",
@@ -92,6 +93,7 @@ describe("services/settings", () => {
           updateReleasesUrl: "https://example.invalid/releases.json",
           wslAutoConfig: true,
           wslTargetCli: { claude: true, codex: false, gemini: true },
+          codexHomeOverride: "D:\\CodexHome",
         }),
       })
     );
