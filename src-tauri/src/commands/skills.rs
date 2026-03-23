@@ -105,6 +105,24 @@ pub(crate) async fn skill_install(
 }
 
 #[tauri::command]
+pub(crate) async fn skill_install_to_local(
+    app: tauri::AppHandle,
+    db_state: tauri::State<'_, DbInitState>,
+    workspace_id: i64,
+    git_url: String,
+    branch: String,
+    source_subdir: String,
+) -> Result<skills::LocalSkillSummary, String> {
+    let db = ensure_db_ready(app.clone(), db_state.inner()).await?;
+    tauri::async_runtime::spawn_blocking(move || {
+        skills::install_to_local(&app, &db, workspace_id, &git_url, &branch, &source_subdir)
+    })
+    .await
+    .map_err(|e| format!("SKILL_TASK_JOIN: {e}"))?
+    .map_err(Into::into)
+}
+
+#[tauri::command]
 pub(crate) async fn skill_set_enabled(
     app: tauri::AppHandle,
     db_state: tauri::State<'_, DbInitState>,
@@ -161,6 +179,22 @@ pub(crate) async fn skills_local_list(
         .await
         .map_err(|e| format!("SKILL_TASK_JOIN: {e}"))?
         .map_err(Into::into)
+}
+
+#[tauri::command]
+pub(crate) async fn skill_local_delete(
+    app: tauri::AppHandle,
+    db_state: tauri::State<'_, DbInitState>,
+    workspace_id: i64,
+    dir_name: String,
+) -> Result<bool, String> {
+    let db = ensure_db_ready(app.clone(), db_state.inner()).await?;
+    tauri::async_runtime::spawn_blocking(move || {
+        skills::delete_local(&app, &db, workspace_id, &dir_name)
+    })
+    .await
+    .map_err(|e| format!("SKILL_TASK_JOIN: {e}"))??;
+    Ok(true)
 }
 
 #[tauri::command]

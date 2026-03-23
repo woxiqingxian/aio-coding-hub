@@ -43,6 +43,9 @@ export type LocalSkillSummary = {
   path: string;
   name: string;
   description: string;
+  source_git_url?: string | null;
+  source_branch?: string | null;
+  source_subdir?: string | null;
 };
 
 export type SkillImportIssue = {
@@ -107,6 +110,20 @@ export async function skillInstall(input: {
   });
 }
 
+export async function skillInstallToLocal(input: {
+  workspace_id: number;
+  git_url: string;
+  branch: string;
+  source_subdir: string;
+}) {
+  return invokeService<LocalSkillSummary>("安装到当前 CLI 失败", "skill_install_to_local", {
+    workspaceId: input.workspace_id,
+    gitUrl: input.git_url,
+    branch: input.branch,
+    sourceSubdir: input.source_subdir,
+  });
+}
+
 export async function skillSetEnabled(input: {
   workspace_id: number;
   skill_id: number;
@@ -133,6 +150,13 @@ export async function skillReturnToLocal(input: { workspace_id: number; skill_id
 export async function skillsLocalList(workspaceId: number) {
   return invokeService<LocalSkillSummary[]>("读取本地技能列表失败", "skills_local_list", {
     workspaceId,
+  });
+}
+
+export async function skillLocalDelete(input: { workspace_id: number; dir_name: string }) {
+  return invokeService<boolean>("删除本地技能失败", "skill_local_delete", {
+    workspaceId: input.workspace_id,
+    dirName: input.dir_name,
   });
 }
 

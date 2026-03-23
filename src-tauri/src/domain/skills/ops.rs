@@ -1,5 +1,6 @@
 use super::fs_ops::{
-    copy_dir_recursive, has_skill_md, is_managed_dir, is_symlink, remove_managed_dir, remove_marker,
+    copy_dir_recursive, has_skill_md, is_managed_dir, is_symlink, remove_managed_dir,
+    remove_marker, write_source_metadata, SkillSourceMetadata,
 };
 use super::installed::{generate_unique_skill_key, get_skill_by_id, get_skill_by_id_for_workspace};
 use super::paths::{cli_skills_root, ensure_skills_roots, ssot_skills_root, validate_cli_key};
@@ -59,7 +60,10 @@ fn ensure_ssot_dir_exists<R: tauri::Runtime>(
             .into());
     }
 
-    copy_dir_recursive(&local_source_dir, ssot_dir)?;
+    if let Err(err) = copy_dir_recursive(&local_source_dir, ssot_dir) {
+        let _ = std::fs::remove_dir_all(ssot_dir);
+        return Err(err);
+    }
     Ok(())
 }
 
@@ -87,8 +91,14 @@ fn sync_to_cli<R: tauri::Runtime>(
         }
     }
 
-    copy_dir_recursive(ssot_dir, &target)?;
-    super::fs_ops::write_marker(&target)?;
+    if let Err(err) = copy_dir_recursive(ssot_dir, &target) {
+        let _ = std::fs::remove_dir_all(&target);
+        return Err(err);
+    }
+    if let Err(err) = super::fs_ops::write_marker(&target) {
+        let _ = std::fs::remove_dir_all(&target);
+        return Err(err);
+    }
     Ok(())
 }
 
@@ -130,7 +140,10 @@ fn ensure_local_target_for_return(
     }
 
     // At this point local_target does not exist (either never existed or was removed above).
-    copy_dir_recursive(ssot_dir, local_target)?;
+    if let Err(err) = copy_dir_recursive(ssot_dir, local_target) {
+        let _ = std::fs::remove_dir_all(local_target);
+        return Err(err);
+    }
     remove_marker(local_target);
     Ok(())
 }
@@ -437,6 +450,14 @@ pub fn return_to_local<R: tauri::Runtime>(
         .map_err(|e| format!("failed to create {}: {e}", cli_root.display()))?;
     let local_target = cli_root.join(&skill.skill_key);
     ensure_local_target_for_return(&local_target, &ssot_dir)?;
+    write_source_metadata(
+        &local_target,
+        &SkillSourceMetadata {
+            source_git_url: skill.source_git_url.clone(),
+            source_branch: skill.source_branch.clone(),
+            source_subdir: skill.source_subdir.clone(),
+        },
+    )?;
     remove_managed_targets_except(app, &skill.skill_key, &local_target)?;
 
     std::fs::remove_dir_all(&ssot_dir)

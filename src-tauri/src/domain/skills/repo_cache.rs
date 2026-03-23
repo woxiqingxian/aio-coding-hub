@@ -19,7 +19,7 @@ fn fnv1a64(input: &str) -> u64 {
 }
 
 fn repo_cache_dir(
-    app: &tauri::AppHandle,
+    app: &tauri::AppHandle<impl tauri::Runtime>,
     git_url: &str,
     branch: &str,
 ) -> crate::shared::error::AppResult<PathBuf> {
@@ -409,7 +409,7 @@ fn write_repo_snapshot_marker(
 }
 
 fn ensure_github_repo_snapshot(
-    app: &tauri::AppHandle,
+    app: &tauri::AppHandle<impl tauri::Runtime>,
     git_url: &str,
     owner: &str,
     repo: &str,
@@ -561,7 +561,7 @@ fn ensure_github_repo_snapshot(
 }
 
 fn ensure_git_repo_cache(
-    app: &tauri::AppHandle,
+    app: &tauri::AppHandle<impl tauri::Runtime>,
     git_url: &str,
     branch: &str,
     refresh: bool,
@@ -715,7 +715,7 @@ fn ensure_git_repo_cache(
 }
 
 pub(super) fn ensure_repo_cache(
-    app: &tauri::AppHandle,
+    app: &tauri::AppHandle<impl tauri::Runtime>,
     git_url: &str,
     branch: &str,
     refresh: bool,

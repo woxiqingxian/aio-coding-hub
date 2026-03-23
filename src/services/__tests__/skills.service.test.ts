@@ -3,8 +3,10 @@ import { logToConsole } from "../consoleLog";
 import { invokeTauriOrNull } from "../tauriInvoke";
 import {
   skillImportLocal,
+  skillLocalDelete,
   skillReturnToLocal,
   skillInstall,
+  skillInstallToLocal,
   skillRepoDelete,
   skillRepoUpsert,
   skillReposList,
@@ -99,6 +101,19 @@ describe("services/skills", () => {
       enabled: false,
     });
 
+    await skillInstallToLocal({
+      workspace_id: 1,
+      git_url: "https://example.com/repo.git",
+      branch: "main",
+      source_subdir: "skills/a",
+    });
+    expect(invokeTauriOrNull).toHaveBeenCalledWith("skill_install_to_local", {
+      workspaceId: 1,
+      gitUrl: "https://example.com/repo.git",
+      branch: "main",
+      sourceSubdir: "skills/a",
+    });
+
     await skillUninstall(2);
     expect(invokeTauriOrNull).toHaveBeenCalledWith("skill_uninstall", { skillId: 2 });
 
@@ -110,6 +125,12 @@ describe("services/skills", () => {
 
     await skillsLocalList(1);
     expect(invokeTauriOrNull).toHaveBeenCalledWith("skills_local_list", { workspaceId: 1 });
+
+    await skillLocalDelete({ workspace_id: 1, dir_name: "my-skill" });
+    expect(invokeTauriOrNull).toHaveBeenCalledWith("skill_local_delete", {
+      workspaceId: 1,
+      dirName: "my-skill",
+    });
 
     await skillImportLocal({ workspace_id: 1, dir_name: "my-skill" });
     expect(invokeTauriOrNull).toHaveBeenCalledWith("skill_import_local", {

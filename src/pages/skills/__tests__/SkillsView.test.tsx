@@ -1,12 +1,14 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { toast } from "sonner";
-import { useState } from "react";
 import { SkillsView } from "../SkillsView";
 import {
   useSkillImportLocalMutation,
+  useSkillLocalDeleteMutation,
   useSkillReturnToLocalMutation,
   useSkillSetEnabledMutation,
+  useSkillUninstallMutation,
   useSkillsInstalledListQuery,
   useSkillsLocalListQuery,
 } from "../../../query/skills";
@@ -23,13 +25,15 @@ vi.mock("../../../query/skills", async () => {
     useSkillsInstalledListQuery: vi.fn(),
     useSkillsLocalListQuery: vi.fn(),
     useSkillSetEnabledMutation: vi.fn(),
+    useSkillUninstallMutation: vi.fn(),
     useSkillReturnToLocalMutation: vi.fn(),
+    useSkillLocalDeleteMutation: vi.fn(),
     useSkillImportLocalMutation: vi.fn(),
   };
 });
 
 describe("pages/skills/SkillsView", () => {
-  it("supports enabling/returning installed skills and importing local skills", async () => {
+  it("supports enabling/deleting/returning installed skills and importing/deleting local skills", async () => {
     const installed = [
       {
         id: 1,
@@ -62,9 +66,17 @@ describe("pages/skills/SkillsView", () => {
     toggleMutation.mutateAsync.mockResolvedValue({ ...installed[0], enabled: true });
     vi.mocked(useSkillSetEnabledMutation).mockReturnValue(toggleMutation as any);
 
+    const uninstallMutation = { isPending: false, mutateAsync: vi.fn(), variables: null };
+    uninstallMutation.mutateAsync.mockResolvedValue(true);
+    vi.mocked(useSkillUninstallMutation).mockReturnValue(uninstallMutation as any);
+
     const returnToLocalMutation = { isPending: false, mutateAsync: vi.fn(), variables: null };
     returnToLocalMutation.mutateAsync.mockResolvedValue(true);
     vi.mocked(useSkillReturnToLocalMutation).mockReturnValue(returnToLocalMutation as any);
+
+    const localDeleteMutation = { isPending: false, mutateAsync: vi.fn(), variables: null };
+    localDeleteMutation.mutateAsync.mockResolvedValue(true);
+    vi.mocked(useSkillLocalDeleteMutation).mockReturnValue(localDeleteMutation as any);
 
     const importMutation = { isPending: false, mutateAsync: vi.fn(), variables: null };
     importMutation.mutateAsync.mockResolvedValue({ id: 2 });
@@ -80,19 +92,116 @@ describe("pages/skills/SkillsView", () => {
       expect(toggleMutation.mutateAsync).toHaveBeenCalledWith({ skillId: 1, enabled: true })
     );
 
+    fireEvent.click(screen.getByRole("button", { name: "删除通用技能 My Skill" }));
+    let dialog = within(screen.getByRole("dialog"));
+    fireEvent.click(dialog.getByRole("button", { name: "确认删除" }));
+    await waitFor(() => expect(uninstallMutation.mutateAsync).toHaveBeenCalledWith(1));
+
     fireEvent.click(screen.getByRole("button", { name: "返回本机已安装" }));
-    const returnDialog = within(screen.getByRole("dialog"));
-    fireEvent.click(returnDialog.getByRole("button", { name: "确认返回" }));
     await waitFor(() => expect(returnToLocalMutation.mutateAsync).toHaveBeenCalledWith(1));
 
     const importButton = await screen.findByRole("button", { name: "导入技能库" });
     fireEvent.click(importButton);
-    const importDialog = within(screen.getByRole("dialog"));
-    fireEvent.click(importDialog.getByRole("button", { name: "确认导入" }));
+    dialog = within(screen.getByRole("dialog"));
+    fireEvent.click(dialog.getByRole("button", { name: "确认导入" }));
     await waitFor(() => expect(importMutation.mutateAsync).toHaveBeenCalledWith("local-skill"));
+
+    fireEvent.click(screen.getByRole("button", { name: "删除本机技能 Local Skill" }));
+    dialog = within(screen.getByRole("dialog"));
+    fireEvent.click(dialog.getByRole("button", { name: "确认删除" }));
+    await waitFor(() =>
+      expect(localDeleteMutation.mutateAsync).toHaveBeenCalledWith("local-skill")
+    );
 
     fireEvent.click(screen.getByRole("button", { name: "打开目录" }));
     await waitFor(() => expect(tauriRevealItemInDir).toHaveBeenCalledWith("/tmp/local-skill"));
+  });
+
+  it("supports batch deleting installed and local skills", async () => {
+    const installed = [
+      {
+        id: 1,
+        name: "Skill A",
+        description: "A",
+        enabled: true,
+        source_git_url: "https://example.com/repo-a.git",
+        source_branch: "main",
+        source_subdir: "skills/a",
+        updated_at: 100,
+      },
+      {
+        id: 2,
+        name: "Skill B",
+        description: "B",
+        enabled: false,
+        source_git_url: "https://example.com/repo-b.git",
+        source_branch: "main",
+        source_subdir: "skills/b",
+        updated_at: 200,
+      },
+    ] as any[];
+
+    const localSkills = [
+      { dir_name: "local-a", name: "Local A", description: "A", path: "/tmp/local-a" },
+      { dir_name: "local-b", name: "Local B", description: "B", path: "/tmp/local-b" },
+    ] as any[];
+
+    vi.mocked(useSkillsInstalledListQuery).mockReturnValue({
+      data: installed,
+      isFetching: false,
+      error: null,
+    } as any);
+    vi.mocked(useSkillsLocalListQuery).mockReturnValue({
+      data: localSkills,
+      isFetching: false,
+      error: null,
+      refetch: vi.fn().mockResolvedValue({ data: localSkills }),
+    } as any);
+    vi.mocked(useSkillSetEnabledMutation).mockReturnValue({
+      isPending: false,
+      mutateAsync: vi.fn(),
+    } as any);
+
+    const uninstallMutation = { isPending: false, mutateAsync: vi.fn(), variables: null };
+    uninstallMutation.mutateAsync.mockResolvedValue(true);
+    vi.mocked(useSkillUninstallMutation).mockReturnValue(uninstallMutation as any);
+
+    vi.mocked(useSkillReturnToLocalMutation).mockReturnValue({
+      isPending: false,
+      mutateAsync: vi.fn(),
+      variables: null,
+    } as any);
+
+    const localDeleteMutation = { isPending: false, mutateAsync: vi.fn(), variables: null };
+    localDeleteMutation.mutateAsync.mockResolvedValue(true);
+    vi.mocked(useSkillLocalDeleteMutation).mockReturnValue(localDeleteMutation as any);
+
+    vi.mocked(useSkillImportLocalMutation).mockReturnValue({
+      isPending: false,
+      mutateAsync: vi.fn(),
+      variables: null,
+    } as any);
+
+    render(<SkillsView workspaceId={1} cliKey="claude" isActiveWorkspace />);
+
+    fireEvent.click(screen.getByRole("checkbox", { name: "全选通用技能" }));
+    fireEvent.click(screen.getByRole("button", { name: "删除通用技能 (2)" }));
+
+    let dialog = within(screen.getByRole("dialog"));
+    fireEvent.click(dialog.getByRole("button", { name: "确认删除" }));
+    await waitFor(() => expect(uninstallMutation.mutateAsync).toHaveBeenCalledTimes(2));
+    expect(uninstallMutation.mutateAsync.mock.calls.map(([skillId]) => skillId)).toEqual([1, 2]);
+
+    fireEvent.click(screen.getByRole("checkbox", { name: "全选本机技能" }));
+    fireEvent.click(screen.getByRole("button", { name: "删除本机技能 (2)" }));
+
+    dialog = within(screen.getByRole("dialog"));
+    fireEvent.click(dialog.getByRole("button", { name: "确认删除" }));
+    await waitFor(() => expect(localDeleteMutation.mutateAsync).toHaveBeenCalledTimes(2));
+    expect(localDeleteMutation.mutateAsync.mock.calls.map(([dirName]) => dirName)).toEqual([
+      "local-a",
+      "local-b",
+    ]);
   });
 
   it("keeps batch_init entry as refresh-only for local skills", async () => {
@@ -129,7 +238,17 @@ describe("pages/skills/SkillsView", () => {
       isPending: false,
       mutateAsync: vi.fn(),
     } as any);
+    vi.mocked(useSkillUninstallMutation).mockReturnValue({
+      isPending: false,
+      mutateAsync: vi.fn(),
+      variables: null,
+    } as any);
     vi.mocked(useSkillReturnToLocalMutation).mockReturnValue({
+      isPending: false,
+      mutateAsync: vi.fn(),
+      variables: null,
+    } as any);
+    vi.mocked(useSkillLocalDeleteMutation).mockReturnValue({
       isPending: false,
       mutateAsync: vi.fn(),
       variables: null,
@@ -172,7 +291,17 @@ describe("pages/skills/SkillsView", () => {
       isPending: false,
       mutateAsync: vi.fn(),
     } as any);
+    vi.mocked(useSkillUninstallMutation).mockReturnValue({
+      isPending: false,
+      mutateAsync: vi.fn(),
+      variables: null,
+    } as any);
     vi.mocked(useSkillReturnToLocalMutation).mockReturnValue({
+      isPending: false,
+      mutateAsync: vi.fn(),
+      variables: null,
+    } as any);
+    vi.mocked(useSkillLocalDeleteMutation).mockReturnValue({
       isPending: false,
       mutateAsync: vi.fn(),
       variables: null,
@@ -204,7 +333,17 @@ describe("pages/skills/SkillsView", () => {
       isPending: false,
       mutateAsync: vi.fn(),
     } as any);
+    vi.mocked(useSkillUninstallMutation).mockReturnValue({
+      isPending: false,
+      mutateAsync: vi.fn(),
+      variables: null,
+    } as any);
     vi.mocked(useSkillReturnToLocalMutation).mockReturnValue({
+      isPending: false,
+      mutateAsync: vi.fn(),
+      variables: null,
+    } as any);
+    vi.mocked(useSkillLocalDeleteMutation).mockReturnValue({
       isPending: false,
       mutateAsync: vi.fn(),
       variables: null,
@@ -219,7 +358,7 @@ describe("pages/skills/SkillsView", () => {
     expect(screen.getByText(/仅当前工作区可扫描\/导入本机 Skill/)).toBeInTheDocument();
   });
 
-  it("covers tauri-only + error branches and import guard when workspace becomes inactive", async () => {
+  it("covers tauri-only + error branches and local delete/import guards when workspace becomes inactive", async () => {
     const installed = [
       {
         id: 1,
@@ -266,11 +405,21 @@ describe("pages/skills/SkillsView", () => {
       .mockRejectedValueOnce(new Error("boom"));
     vi.mocked(useSkillSetEnabledMutation).mockReturnValue(toggleMutation as any);
 
+    const uninstallMutation = { isPending: false, mutateAsync: vi.fn(), variables: null };
+    uninstallMutation.mutateAsync
+      .mockResolvedValueOnce(false)
+      .mockRejectedValueOnce(new Error("boom"));
+    vi.mocked(useSkillUninstallMutation).mockReturnValue(uninstallMutation as any);
+
     const returnToLocalMutation = { isPending: false, mutateAsync: vi.fn(), variables: null };
     returnToLocalMutation.mutateAsync
       .mockResolvedValueOnce(false)
       .mockRejectedValueOnce(new Error("boom"));
     vi.mocked(useSkillReturnToLocalMutation).mockReturnValue(returnToLocalMutation as any);
+
+    const localDeleteMutation = { isPending: false, mutateAsync: vi.fn(), variables: null };
+    localDeleteMutation.mutateAsync.mockResolvedValueOnce(false);
+    vi.mocked(useSkillLocalDeleteMutation).mockReturnValue(localDeleteMutation as any);
 
     const importMutation = { isPending: false, mutateAsync: vi.fn(), variables: null };
     importMutation.mutateAsync.mockResolvedValueOnce(null);
@@ -295,7 +444,6 @@ describe("pages/skills/SkillsView", () => {
 
     render(<Wrapper />);
 
-    // toggle: tauri-only + disable + error branches
     fireEvent.click(screen.getAllByRole("switch")[0]!);
     await waitFor(() => expect(toggleMutation.mutateAsync).toHaveBeenCalledTimes(1));
 
@@ -305,7 +453,16 @@ describe("pages/skills/SkillsView", () => {
     fireEvent.click(screen.getAllByRole("switch")[0]!);
     await waitFor(() => expect(toggleMutation.mutateAsync).toHaveBeenCalledTimes(3));
 
-    // open dir: openPath success then reveal failure -> openLocalSkillDir catch
+    fireEvent.click(screen.getByRole("button", { name: "删除通用技能 S1" }));
+    let dialog = within(screen.getByRole("dialog"));
+    fireEvent.click(dialog.getByRole("button", { name: "确认删除" }));
+    await waitFor(() => expect(uninstallMutation.mutateAsync).toHaveBeenCalledTimes(1));
+
+    fireEvent.click(screen.getByRole("button", { name: "删除通用技能 S1" }));
+    dialog = within(screen.getByRole("dialog"));
+    fireEvent.click(dialog.getByRole("button", { name: "确认删除" }));
+    await waitFor(() => expect(uninstallMutation.mutateAsync).toHaveBeenCalledTimes(2));
+
     fireEvent.click(screen.getByRole("button", { name: "打开目录" }));
     await waitFor(() => expect(tauriOpenPath).toHaveBeenCalledWith("/tmp/local-skill"));
 
@@ -315,27 +472,32 @@ describe("pages/skills/SkillsView", () => {
     );
 
     fireEvent.click(screen.getAllByRole("button", { name: "返回本机已安装" })[0]!);
-    const returnDialog = within(screen.getByRole("dialog"));
-    fireEvent.click(returnDialog.getByRole("button", { name: "确认返回" }));
     await waitFor(() => expect(returnToLocalMutation.mutateAsync).toHaveBeenCalledTimes(1));
-    fireEvent.click(returnDialog.getByRole("button", { name: "确认返回" }));
+    fireEvent.click(screen.getAllByRole("button", { name: "返回本机已安装" })[0]!);
     await waitFor(() => expect(returnToLocalMutation.mutateAsync).toHaveBeenCalledTimes(2));
-    fireEvent.click(returnDialog.getByRole("button", { name: "取消" }));
 
-    // import: tauri-only null branch, then guard branch after becoming inactive
+    fireEvent.click(screen.getByRole("button", { name: "删除本机技能 local-skill" }));
+    dialog = within(screen.getByRole("dialog"));
+    fireEvent.click(dialog.getByRole("button", { name: "确认删除" }));
+    await waitFor(() => expect(localDeleteMutation.mutateAsync).toHaveBeenCalledTimes(1));
+
     const importButton = await screen.findByRole("button", { name: "导入技能库" });
     fireEvent.click(importButton);
-    const importDialog = within(screen.getByRole("dialog"));
-    fireEvent.click(importDialog.getByRole("button", { name: "确认导入" }));
+    dialog = within(screen.getByRole("dialog"));
+    fireEvent.click(dialog.getByRole("button", { name: "确认导入" }));
     await waitFor(() => expect(importMutation.mutateAsync).toHaveBeenCalledTimes(1));
+    fireEvent.click(dialog.getByRole("button", { name: "取消" }));
 
+    fireEvent.click(screen.getByRole("button", { name: "删除本机技能 local-skill" }));
+    dialog = within(screen.getByRole("dialog"));
     fireEvent.click(screen.getByRole("button", { name: "deactivate", hidden: true }));
-    fireEvent.click(importDialog.getByRole("button", { name: "确认导入" }));
+    fireEvent.click(dialog.getByRole("button", { name: "确认删除" }));
     await waitFor(() =>
       expect(vi.mocked(toast)).toHaveBeenCalledWith(
-        expect.stringContaining("仅当前工作区可导入本机 Skill")
+        expect.stringContaining("仅当前工作区可删除本机 Skill")
       )
     );
+    expect(localDeleteMutation.mutateAsync).toHaveBeenCalledTimes(1);
     expect(importMutation.mutateAsync).toHaveBeenCalledTimes(1);
 
     const refreshButton = screen.getByRole("button", { name: "刷新", hidden: true });

@@ -291,10 +291,12 @@ export const handlers = [
   http.post(`${TAURI_ENDPOINT}/skills_installed_list`, () => HttpResponse.json([])),
   http.post(`${TAURI_ENDPOINT}/skills_discover_available`, () => HttpResponse.json([])),
   http.post(`${TAURI_ENDPOINT}/skill_install`, () => HttpResponse.json(null)),
+  http.post(`${TAURI_ENDPOINT}/skill_install_to_local`, () => HttpResponse.json(null)),
   http.post(`${TAURI_ENDPOINT}/skill_set_enabled`, () => HttpResponse.json(null)),
   http.post(`${TAURI_ENDPOINT}/skill_uninstall`, () => HttpResponse.json(true)),
   http.post(`${TAURI_ENDPOINT}/skill_return_to_local`, () => HttpResponse.json(true)),
   http.post(`${TAURI_ENDPOINT}/skills_local_list`, () => HttpResponse.json([])),
+  http.post(`${TAURI_ENDPOINT}/skill_local_delete`, () => HttpResponse.json(true)),
   http.post(`${TAURI_ENDPOINT}/skill_import_local`, () => HttpResponse.json(null)),
   http.post(`${TAURI_ENDPOINT}/skills_import_local_batch`, () =>
     HttpResponse.json({ imported: [], skipped: [], failed: [] })

@@ -47,6 +47,9 @@ pub struct LocalSkillSummary {
     pub path: String,
     pub name: String,
     pub description: String,
+    pub source_git_url: Option<String>,
+    pub source_branch: Option<String>,
+    pub source_subdir: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]

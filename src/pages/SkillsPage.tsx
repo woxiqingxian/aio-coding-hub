@@ -87,12 +87,7 @@ export function SkillsPage() {
             页面创建并设为当前。
           </div>
         ) : (
-          <SkillsView
-            workspaceId={activeWorkspaceId}
-            cliKey={activeCli}
-            isActiveWorkspace
-            localImportMode="batch_init"
-          />
+          <SkillsView workspaceId={activeWorkspaceId} cliKey={activeCli} isActiveWorkspace />
         )}
       </div>
     </div>

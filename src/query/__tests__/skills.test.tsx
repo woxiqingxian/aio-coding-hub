@@ -9,6 +9,8 @@ import type {
 } from "../../services/skills";
 import {
   skillImportLocal,
+  skillInstallToLocal,
+  skillLocalDelete,
   skillReturnToLocal,
   skillsImportLocalBatch,
   skillInstall,
@@ -27,6 +29,8 @@ import { setTauriRuntime } from "../../test/utils/tauriRuntime";
 import { skillsKeys } from "../keys";
 import {
   useSkillImportLocalMutation,
+  useSkillInstallToLocalMutation,
+  useSkillLocalDeleteMutation,
   useSkillReturnToLocalMutation,
   useSkillsImportLocalBatchMutation,
   useSkillInstallMutation,
@@ -55,9 +59,11 @@ vi.mock("../../services/skills", async () => {
     skillRepoUpsert: vi.fn(),
     skillRepoDelete: vi.fn(),
     skillInstall: vi.fn(),
+    skillInstallToLocal: vi.fn(),
     skillSetEnabled: vi.fn(),
     skillUninstall: vi.fn(),
     skillReturnToLocal: vi.fn(),
+    skillLocalDelete: vi.fn(),
     skillImportLocal: vi.fn(),
     skillsImportLocalBatch: vi.fn(),
   };
@@ -137,6 +143,46 @@ describe("query/skills", () => {
     });
   });
 
+  it("useSkillsInstalledListQuery drops stale data when workspaceId becomes null", async () => {
+    setTauriRuntime();
+    const rows: InstalledSkillSummary[] = [
+      {
+        id: 1,
+        skill_key: "alpha",
+        name: "Alpha",
+        description: "",
+        source_git_url: "https://example.com/acme/repo.git",
+        source_branch: "main",
+        source_subdir: "skills/alpha",
+        enabled: true,
+        created_at: 1,
+        updated_at: 1,
+      },
+    ];
+    vi.mocked(skillsInstalledList).mockResolvedValue(rows);
+
+    const client = createTestQueryClient();
+    const wrapper = createQueryWrapper(client);
+
+    const { result, rerender } = renderHook(
+      ({ workspaceId }: { workspaceId: number | null }) => useSkillsInstalledListQuery(workspaceId),
+      {
+        wrapper,
+        initialProps: { workspaceId: 1 as number | null },
+      }
+    );
+
+    await waitFor(() => {
+      expect(result.current.data).toEqual(rows);
+    });
+
+    rerender({ workspaceId: null as number | null });
+
+    await waitFor(() => {
+      expect(result.current.data).toBeUndefined();
+    });
+  });
+
   it("useSkillsLocalListQuery refetch returns null when workspaceId is null", async () => {
     setTauriRuntime();
 
@@ -163,6 +209,43 @@ describe("query/skills", () => {
 
     await waitFor(() => {
       expect(skillsLocalList).toHaveBeenCalledWith(1);
+    });
+  });
+
+  it("useSkillsLocalListQuery drops stale data when workspaceId becomes null", async () => {
+    setTauriRuntime();
+    const rows: LocalSkillSummary[] = [
+      {
+        dir_name: "alpha",
+        path: "/tmp/alpha",
+        name: "Alpha",
+        description: "",
+        source_git_url: "https://example.com/acme/repo.git",
+        source_branch: "main",
+        source_subdir: "skills/alpha",
+      },
+    ];
+    vi.mocked(skillsLocalList).mockResolvedValue(rows);
+
+    const client = createTestQueryClient();
+    const wrapper = createQueryWrapper(client);
+
+    const { result, rerender } = renderHook(
+      ({ workspaceId }: { workspaceId: number | null }) => useSkillsLocalListQuery(workspaceId),
+      {
+        wrapper,
+        initialProps: { workspaceId: 1 as number | null },
+      }
+    );
+
+    await waitFor(() => {
+      expect(result.current.data).toEqual(rows);
+    });
+
+    rerender({ workspaceId: null as number | null });
+
+    await waitFor(() => {
+      expect(result.current.data).toBeUndefined();
     });
   });
 
@@ -516,6 +599,70 @@ describe("query/skills", () => {
     expect(client.getQueryData(skillsKeys.installedList(1))).toEqual([updated]);
   });
 
+  it("useSkillInstallToLocalMutation no-ops on null response", async () => {
+    setTauriRuntime();
+    vi.mocked(skillInstallToLocal).mockResolvedValue(null);
+
+    const client = createTestQueryClient();
+    client.setQueryData(skillsKeys.localList(1), []);
+    const wrapper = createQueryWrapper(client);
+
+    const { result } = renderHook(() => useSkillInstallToLocalMutation(1), { wrapper });
+    await act(async () => {
+      await result.current.mutateAsync({
+        gitUrl: "https://x",
+        branch: "main",
+        sourceSubdir: "s",
+      });
+    });
+
+    expect(client.getQueryData(skillsKeys.localList(1))).toEqual([]);
+  });
+
+  it("useSkillInstallToLocalMutation inserts or updates local list rows", async () => {
+    setTauriRuntime();
+
+    const next: LocalSkillSummary = {
+      dir_name: "skill-a",
+      path: "/tmp/skill-a",
+      name: "Skill A",
+      description: "desc",
+      source_git_url: "https://example.com/repo.git",
+      source_branch: "main",
+      source_subdir: "skills/a",
+    };
+    vi.mocked(skillInstallToLocal).mockResolvedValue(next);
+
+    const client = createTestQueryClient();
+    client.setQueryData(skillsKeys.localList(1), []);
+    const wrapper = createQueryWrapper(client);
+
+    const { result, rerender } = renderHook(() => useSkillInstallToLocalMutation(1), { wrapper });
+    await act(async () => {
+      await result.current.mutateAsync({
+        gitUrl: next.source_git_url ?? "",
+        branch: next.source_branch ?? "",
+        sourceSubdir: next.source_subdir ?? "",
+      });
+    });
+
+    expect(client.getQueryData(skillsKeys.localList(1))).toEqual([next]);
+
+    vi.mocked(skillInstallToLocal).mockResolvedValue({ ...next, description: "updated" });
+    rerender();
+    await act(async () => {
+      await result.current.mutateAsync({
+        gitUrl: next.source_git_url ?? "",
+        branch: next.source_branch ?? "",
+        sourceSubdir: next.source_subdir ?? "",
+      });
+    });
+
+    expect(client.getQueryData(skillsKeys.localList(1))).toEqual([
+      expect.objectContaining({ dir_name: "skill-a", description: "updated" }),
+    ]);
+  });
+
   it("useSkillSetEnabledMutation no-ops on null response", async () => {
     setTauriRuntime();
     vi.mocked(skillSetEnabled).mockResolvedValue(null);
@@ -706,6 +853,62 @@ describe("query/skills", () => {
     expect(client.getQueryData(skillsKeys.installedList(1))).toEqual([]);
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: skillsKeys.localList(1) });
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: skillsKeys.discoverAvailable(false) });
+  });
+
+  it("useSkillLocalDeleteMutation no-ops on false result", async () => {
+    setTauriRuntime();
+    vi.mocked(skillLocalDelete).mockResolvedValue(false);
+
+    const prev: LocalSkillSummary[] = [
+      {
+        dir_name: "local-skill",
+        name: "Local Skill",
+        description: "d",
+        path: "/tmp/local-skill",
+      },
+    ];
+
+    const client = createTestQueryClient();
+    client.setQueryData(skillsKeys.localList(1), prev);
+    const wrapper = createQueryWrapper(client);
+
+    const { result } = renderHook(() => useSkillLocalDeleteMutation(1), { wrapper });
+    await act(async () => {
+      await result.current.mutateAsync("local-skill");
+    });
+
+    expect(client.getQueryData(skillsKeys.localList(1))).toEqual(prev);
+  });
+
+  it("useSkillLocalDeleteMutation removes local row on success", async () => {
+    setTauriRuntime();
+    vi.mocked(skillLocalDelete).mockResolvedValue(true);
+
+    const prev: LocalSkillSummary[] = [
+      {
+        dir_name: "local-skill",
+        name: "Local Skill",
+        description: "d",
+        path: "/tmp/local-skill",
+      },
+      {
+        dir_name: "other-skill",
+        name: "Other Skill",
+        description: "d2",
+        path: "/tmp/other-skill",
+      },
+    ];
+
+    const client = createTestQueryClient();
+    client.setQueryData(skillsKeys.localList(1), prev);
+    const wrapper = createQueryWrapper(client);
+
+    const { result } = renderHook(() => useSkillLocalDeleteMutation(1), { wrapper });
+    await act(async () => {
+      await result.current.mutateAsync("local-skill");
+    });
+
+    expect(client.getQueryData(skillsKeys.localList(1))).toEqual([prev[1]]);
   });
 
   it("useSkillImportLocalMutation no-ops on null response", async () => {

@@ -497,6 +497,35 @@ pub fn skill_return_to_local<R: tauri::Runtime>(
     Ok(true)
 }
 
+pub fn skill_local_delete<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    workspace_id: i64,
+    dir_name: &str,
+) -> crate::shared::error::AppResult<bool> {
+    let db = crate::infra::db::init(app)?;
+    crate::skills::delete_local(app, &db, workspace_id, dir_name)?;
+    Ok(true)
+}
+
+pub fn skills_local_list_json<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    workspace_id: i64,
+) -> crate::shared::error::AppResult<serde_json::Value> {
+    let db = crate::infra::db::init(app)?;
+    let rows = crate::skills::local_list(app, &db, workspace_id)?;
+    serialize_json(rows)
+}
+
+pub fn skill_import_local_json<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    workspace_id: i64,
+    dir_name: &str,
+) -> crate::shared::error::AppResult<serde_json::Value> {
+    let db = crate::infra::db::init(app)?;
+    let row = crate::skills::import_local(app, &db, workspace_id, dir_name)?;
+    serialize_json(row)
+}
+
 // ---------------------------------------------------------------------------
 // Sort Modes
 // ---------------------------------------------------------------------------

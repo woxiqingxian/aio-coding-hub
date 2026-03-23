@@ -26,8 +26,10 @@ vi.mock("../../services/consoleLog", async () => {
   return { ...actual, logToConsole: vi.fn() };
 });
 
+const skillsViewMock = vi.fn((_: any) => <div data-testid="skills-view" />);
+
 vi.mock("../skills/SkillsView", () => ({
-  SkillsView: () => <div data-testid="skills-view" />,
+  SkillsView: (props: unknown) => skillsViewMock(props),
 }));
 
 vi.mock("../../query/workspaces", async () => {
@@ -46,6 +48,27 @@ function renderWithProviders(element: ReactElement) {
 }
 
 describe("pages/SkillsPage", () => {
+  it("renders SkillsView with local import enabled for active workspace", () => {
+    setTauriRuntime();
+
+    vi.mocked(useWorkspacesListQuery).mockReturnValue({
+      data: { active_id: 42, items: [] },
+      isFetching: false,
+      error: null,
+    } as any);
+
+    renderWithProviders(<SkillsPage />);
+
+    expect(skillsViewMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        workspaceId: 42,
+        cliKey: "claude",
+        isActiveWorkspace: true,
+      })
+    );
+    expect(skillsViewMock.mock.calls[0]?.[0]).not.toHaveProperty("localImportMode");
+  });
+
   it("reads active cli from localStorage", () => {
     setTauriRuntime();
     localStorage.setItem("skills.activeCli", "codex");

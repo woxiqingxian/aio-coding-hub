@@ -3,6 +3,16 @@ mod support;
 use rusqlite::params;
 use support::SkillTestFixture;
 
+#[cfg(unix)]
+fn symlink_file(src: &std::path::Path, dst: &std::path::Path) -> std::io::Result<()> {
+    std::os::unix::fs::symlink(src, dst)
+}
+
+#[cfg(windows)]
+fn symlink_file(src: &std::path::Path, dst: &std::path::Path) -> std::io::Result<()> {
+    std::os::windows::fs::symlink_file(src, dst)
+}
+
 #[test]
 fn return_to_local_moves_skill_out_of_managed_registry_and_keeps_local_dir() {
     let app = support::TestApp::new();
@@ -60,4 +70,47 @@ fn return_to_local_moves_skill_out_of_managed_registry_and_keeps_local_dir() {
         )
         .expect("count skills");
     assert_eq!(remaining, 0, "skill row should be deleted");
+}
+
+#[test]
+fn return_to_local_blocks_symlink_entries_inside_ssot_dir() {
+    let app = support::TestApp::new();
+    let handle = app.handle();
+
+    aio_coding_hub_lib::test_support::init_db(&handle).expect("init db");
+    let fix = SkillTestFixture::new(&app, &handle, "codex", "Codex Return Symlink");
+
+    let external_file = app.home_dir().join("external.txt");
+    std::fs::write(&external_file, "external\n").expect("write external file");
+    symlink_file(&external_file, &fix.ssot_skill_dir.join("linked.txt")).expect("create symlink");
+
+    let err = aio_coding_hub_lib::test_support::skill_return_to_local(
+        &handle,
+        fix.workspace_id,
+        fix.skill_id,
+    )
+    .unwrap_err()
+    .to_string();
+
+    assert!(
+        err.starts_with("SKILL_COPY_BLOCKED_SYMLINK:"),
+        "unexpected error: {err}"
+    );
+    assert!(
+        !fix.cli_skills_root.join(&fix.skill_key).exists(),
+        "local target should be cleaned up after a blocked copy"
+    );
+
+    let remaining: i64 = fix
+        .conn
+        .query_row(
+            "SELECT COUNT(1) FROM skills WHERE id = ?1",
+            params![fix.skill_id],
+            |row| row.get(0),
+        )
+        .expect("count skills");
+    assert_eq!(
+        remaining, 1,
+        "skill row should remain when return_to_local fails"
+    );
 }

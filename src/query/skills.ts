@@ -7,11 +7,13 @@ import {
   skillInstall,
   skillRepoDelete,
   skillRepoUpsert,
+  skillInstallToLocal,
   skillReposList,
   skillSetEnabled,
   skillUninstall,
   skillsDiscoverAvailable,
   skillsInstalledList,
+  skillLocalDelete,
   skillsLocalList,
   skillsPathsGet,
   skillImportLocal,
@@ -47,7 +49,6 @@ export function useSkillsInstalledListQuery(
       return skillsInstalledList(workspaceId);
     },
     enabled: Boolean(workspaceId) && (options?.enabled ?? true),
-    placeholderData: keepPreviousData,
   });
 }
 
@@ -62,7 +63,6 @@ export function useSkillsLocalListQuery(
       return skillsLocalList(workspaceId);
     },
     enabled: Boolean(workspaceId) && (options?.enabled ?? true),
-    placeholderData: keepPreviousData,
   });
 }
 
@@ -184,6 +184,31 @@ export function useSkillInstallMutation(workspaceId: number) {
   });
 }
 
+export function useSkillInstallToLocalMutation(workspaceId: number) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (input: { gitUrl: string; branch: string; sourceSubdir: string }) =>
+      skillInstallToLocal({
+        workspace_id: workspaceId,
+        git_url: input.gitUrl,
+        branch: input.branch,
+        source_subdir: input.sourceSubdir,
+      }),
+    onSuccess: (next) => {
+      if (!next) return;
+      queryClient.setQueryData<LocalSkillSummary[]>(skillsKeys.localList(workspaceId), (cur) => {
+        const prev = cur ?? [];
+        const exists = prev.some((skill) => skill.dir_name === next.dir_name);
+        if (exists) {
+          return prev.map((skill) => (skill.dir_name === next.dir_name ? next : skill));
+        }
+        return [next, ...prev];
+      });
+    },
+  });
+}
+
 export function useSkillSetEnabledMutation(workspaceId: number) {
   const queryClient = useQueryClient();
 
@@ -256,6 +281,21 @@ export function useSkillReturnToLocalMutation(workspaceId: number) {
       );
       queryClient.invalidateQueries({ queryKey: skillsKeys.localList(workspaceId) });
       queryClient.invalidateQueries({ queryKey: skillsKeys.discoverAvailable(false) });
+    },
+  });
+}
+
+export function useSkillLocalDeleteMutation(workspaceId: number) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (dirName: string) =>
+      skillLocalDelete({ workspace_id: workspaceId, dir_name: dirName }),
+    onSuccess: (ok, dirName) => {
+      if (!ok) return;
+      queryClient.setQueryData<LocalSkillSummary[]>(skillsKeys.localList(workspaceId), (cur) =>
+        (cur ?? []).filter((skill) => skill.dir_name !== dirName)
+      );
     },
   });
 }

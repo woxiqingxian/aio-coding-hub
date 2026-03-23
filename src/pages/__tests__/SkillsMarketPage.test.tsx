@@ -1,23 +1,24 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
 import { QueryClientProvider } from "@tanstack/react-query";
-import { MemoryRouter } from "react-router-dom";
 import type { ReactElement } from "react";
+import { MemoryRouter } from "react-router-dom";
+import { describe, expect, it, vi } from "vitest";
 import { toast } from "sonner";
 import { SkillsMarketPage } from "../SkillsMarketPage";
-import { createTestQueryClient } from "../../test/utils/reactQuery";
-import { setTauriRuntime } from "../../test/utils/tauriRuntime";
-import { logToConsole } from "../../services/consoleLog";
-import { useWorkspacesListQuery } from "../../query/workspaces";
 import {
-  useSkillInstallMutation,
+  useSkillInstallToLocalMutation,
   useSkillRepoDeleteMutation,
   useSkillRepoUpsertMutation,
   useSkillReposListQuery,
   useSkillsDiscoverAvailableMutation,
   useSkillsDiscoverAvailableQuery,
   useSkillsInstalledListQuery,
+  useSkillsLocalListQuery,
 } from "../../query/skills";
+import { useWorkspacesListQuery } from "../../query/workspaces";
+import { logToConsole } from "../../services/consoleLog";
+import { createTestQueryClient } from "../../test/utils/reactQuery";
+import { setTauriRuntime } from "../../test/utils/tauriRuntime";
 
 const navigateMock = vi.fn();
 
@@ -40,13 +41,13 @@ vi.mock("../../query/skills", async () => {
   return {
     ...actual,
     useSkillReposListQuery: vi.fn(),
-    useWorkspacesListQuery: vi.fn(),
     useSkillsInstalledListQuery: vi.fn(),
+    useSkillsLocalListQuery: vi.fn(),
     useSkillsDiscoverAvailableQuery: vi.fn(),
     useSkillsDiscoverAvailableMutation: vi.fn(),
     useSkillRepoUpsertMutation: vi.fn(),
     useSkillRepoDeleteMutation: vi.fn(),
-    useSkillInstallMutation: vi.fn(),
+    useSkillInstallToLocalMutation: vi.fn(),
   };
 });
 
@@ -59,46 +60,61 @@ function renderWithProviders(element: ReactElement) {
   );
 }
 
-function getDialogByTitle(title: string): HTMLElement {
-  const dialogs = screen.getAllByRole("dialog");
-  const match = dialogs.find((dialog) => dialog.textContent?.includes(title));
-  if (!match) throw new Error(`Dialog not found: ${title}`);
-  return match;
+function mockCommonState() {
+  vi.mocked(useSkillReposListQuery).mockReturnValue({
+    data: [
+      {
+        id: 1,
+        git_url: "https://github.com/acme/repo-one",
+        branch: "main",
+        enabled: true,
+        created_at: 1,
+        updated_at: 2,
+      },
+      {
+        id: 2,
+        git_url: "https://github.com/acme/repo-two",
+        branch: "main",
+        enabled: true,
+        created_at: 1,
+        updated_at: 3,
+      },
+    ],
+    isLoading: false,
+  } as any);
+  vi.mocked(useWorkspacesListQuery).mockReturnValue({
+    data: { active_id: 7 },
+    isLoading: false,
+  } as any);
+  vi.mocked(useSkillsInstalledListQuery).mockReturnValue({
+    data: [],
+    isLoading: false,
+  } as any);
+  vi.mocked(useSkillsLocalListQuery).mockReturnValue({
+    data: [],
+    isLoading: false,
+  } as any);
+  vi.mocked(useSkillsDiscoverAvailableMutation).mockReturnValue({
+    isPending: false,
+    mutateAsync: vi.fn().mockResolvedValue([]),
+  } as any);
+  vi.mocked(useSkillRepoUpsertMutation).mockReturnValue({ mutateAsync: vi.fn() } as any);
+  vi.mocked(useSkillRepoDeleteMutation).mockReturnValue({ mutateAsync: vi.fn() } as any);
+  vi.mocked(useSkillInstallToLocalMutation).mockReturnValue({ mutateAsync: vi.fn() } as any);
 }
 
 describe("pages/SkillsMarketPage", () => {
   it("validates and saves repo in the repo dialog", async () => {
     setTauriRuntime();
     navigateMock.mockClear();
+    mockCommonState();
 
-    vi.mocked(useSkillReposListQuery).mockReturnValue({ data: [], isLoading: false } as any);
-    vi.mocked(useWorkspacesListQuery).mockReturnValue({
-      data: { active_id: 1 },
-      isLoading: false,
-    } as any);
-    vi.mocked(useSkillsInstalledListQuery).mockReturnValue({ data: [], isLoading: false } as any);
+    const upsert = { mutateAsync: vi.fn().mockResolvedValue({ id: 9 }), isPending: false };
+    vi.mocked(useSkillRepoUpsertMutation).mockReturnValue(upsert as any);
     vi.mocked(useSkillsDiscoverAvailableQuery).mockReturnValue({
       data: [],
       isFetching: false,
     } as any);
-
-    vi.mocked(useSkillsDiscoverAvailableMutation).mockReturnValue({
-      isPending: false,
-      mutateAsync: vi.fn().mockResolvedValue([]),
-    } as any);
-
-    const upsert = { mutateAsync: vi.fn(), isPending: false };
-    upsert.mutateAsync.mockResolvedValue({
-      id: 1,
-      git_url: "https://github.com/acme/skills",
-      branch: "main",
-      enabled: true,
-      created_at: 1,
-      updated_at: 2,
-    });
-    vi.mocked(useSkillRepoUpsertMutation).mockReturnValue(upsert as any);
-    vi.mocked(useSkillRepoDeleteMutation).mockReturnValue({ mutateAsync: vi.fn() } as any);
-    vi.mocked(useSkillInstallMutation).mockReturnValue({ mutateAsync: vi.fn() } as any);
 
     renderWithProviders(<SkillsMarketPage />);
 
@@ -109,18 +125,17 @@ describe("pages/SkillsMarketPage", () => {
     expect(toast).toHaveBeenCalledWith("请填写 Git URL");
 
     fireEvent.change(screen.getByPlaceholderText("https://github.com/owner/repo"), {
-      target: { value: "https://github.com/acme/skills" },
+      target: { value: "https://github.com/acme/new-repo" },
     });
     fireEvent.change(screen.getByPlaceholderText("auto / main / master"), {
       target: { value: "main" },
     });
-
     fireEvent.click(screen.getByRole("button", { name: "添加仓库" }));
 
     await waitFor(() => {
       expect(upsert.mutateAsync).toHaveBeenCalledWith({
         repoId: null,
-        gitUrl: "https://github.com/acme/skills",
+        gitUrl: "https://github.com/acme/new-repo",
         branch: "main",
         enabled: true,
       });
@@ -128,417 +143,253 @@ describe("pages/SkillsMarketPage", () => {
     expect(toast).toHaveBeenCalledWith("仓库已添加");
   });
 
-  it("refreshes discover list and allows installing a skill, or navigates to enable", async () => {
+  it("groups skills by repo and installs a single skill to current CLI", async () => {
     setTauriRuntime();
     navigateMock.mockClear();
+    mockCommonState();
 
-    vi.mocked(useSkillReposListQuery).mockReturnValue({
+    vi.mocked(useSkillsDiscoverAvailableQuery).mockReturnValue({
       data: [
         {
-          id: 1,
-          git_url: "https://github.com/acme/skills",
-          branch: "main",
-          enabled: true,
-          created_at: 1,
-          updated_at: 2,
+          name: "Alpha",
+          description: "Alpha desc",
+          source_git_url: "https://github.com/acme/repo-one",
+          source_branch: "main",
+          source_subdir: "skills/alpha",
+          installed: false,
+        },
+        {
+          name: "Gamma",
+          description: "Gamma desc",
+          source_git_url: "https://github.com/acme/repo-two",
+          source_branch: "main",
+          source_subdir: "skills/gamma",
+          installed: false,
         },
       ],
-      isLoading: false,
+      isFetching: false,
     } as any);
 
-    vi.mocked(useWorkspacesListQuery).mockReturnValue({
-      data: { active_id: 7 },
-      isLoading: false,
-    } as any);
+    const discover = { isPending: false, mutateAsync: vi.fn().mockResolvedValue([{ name: "x" }]) };
+    vi.mocked(useSkillsDiscoverAvailableMutation).mockReturnValue(discover as any);
+
+    const install = {
+      mutateAsync: vi.fn().mockResolvedValue({
+        dir_name: "alpha",
+        path: "/tmp/alpha",
+        name: "Alpha",
+        description: "Alpha desc",
+        source_git_url: "https://github.com/acme/repo-one",
+        source_branch: "main",
+        source_subdir: "skills/alpha",
+      }),
+    };
+    vi.mocked(useSkillInstallToLocalMutation).mockReturnValue(install as any);
+
+    renderWithProviders(<SkillsMarketPage />);
+
+    expect(screen.getAllByText("acme/repo-one")[0]).toBeInTheDocument();
+    expect(screen.getAllByText("acme/repo-two")[0]).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "刷新发现" }));
+    await waitFor(() => expect(discover.mutateAsync).toHaveBeenCalledWith(true));
+    expect(logToConsole).toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "安装到 Claude Code" }));
+    await waitFor(() => {
+      expect(install.mutateAsync).toHaveBeenCalledWith({
+        gitUrl: "https://github.com/acme/repo-one",
+        branch: "main",
+        sourceSubdir: "skills/alpha",
+      });
+    });
+    expect(toast).toHaveBeenCalledWith("已安装到 Claude Code");
+  });
+
+  it("supports installing a whole repo and navigating to generic skills when needed", async () => {
+    setTauriRuntime();
+    navigateMock.mockClear();
+    mockCommonState();
 
     vi.mocked(useSkillsInstalledListQuery).mockReturnValue({
       data: [
         {
           id: 101,
-          skill_key: "k1",
-          name: "Bar",
+          skill_key: "beta",
+          name: "Beta",
           description: "",
-          source_git_url: "https://github.com/acme/skills",
+          source_git_url: "https://github.com/acme/repo-two",
           source_branch: "main",
-          source_subdir: "bar",
+          source_subdir: "skills/beta",
           enabled: false,
           created_at: 1,
           updated_at: 1,
         },
-        {
-          id: 102,
-          skill_key: "k2",
-          name: "Baz",
-          description: "",
-          source_git_url: "https://github.com/acme/skills",
-          source_branch: "main",
-          source_subdir: "baz",
-          enabled: true,
-          created_at: 1,
-          updated_at: 1,
-        },
       ],
       isLoading: false,
     } as any);
-
-    vi.mocked(useSkillsDiscoverAvailableQuery).mockReturnValue({
+    vi.mocked(useSkillsLocalListQuery).mockReturnValue({
       data: [
         {
-          name: "Foo",
-          description: "Foo desc",
-          source_git_url: "https://github.com/acme/skills",
-          source_branch: "main",
-          source_subdir: "foo",
-          installed: false,
-        },
-        {
-          name: "Bar",
+          dir_name: "gamma",
+          path: "/tmp/gamma",
+          name: "Gamma",
           description: "",
-          source_git_url: "https://github.com/acme/skills",
+          source_git_url: "https://github.com/acme/repo-one",
           source_branch: "main",
-          source_subdir: "bar",
-          installed: true,
-        },
-        {
-          name: "Baz",
-          description: "",
-          source_git_url: "https://github.com/acme/skills",
-          source_branch: "main",
-          source_subdir: "baz",
-          installed: true,
-        },
-      ],
-      isFetching: false,
-    } as any);
-
-    const discover = { isPending: false, mutateAsync: vi.fn() };
-    discover.mutateAsync.mockResolvedValue([{ name: "Foo" }, { name: "Bar" }]);
-    vi.mocked(useSkillsDiscoverAvailableMutation).mockReturnValue(discover as any);
-
-    const install = { mutateAsync: vi.fn() };
-    install.mutateAsync.mockResolvedValue({
-      id: 999,
-      skill_key: "k999",
-      name: "Foo",
-      description: "",
-      source_git_url: "https://github.com/acme/skills",
-      source_branch: "main",
-      source_subdir: "foo",
-      enabled: true,
-      created_at: 1,
-      updated_at: 1,
-    });
-    vi.mocked(useSkillInstallMutation).mockReturnValue(install as any);
-
-    vi.mocked(useSkillRepoUpsertMutation).mockReturnValue({ mutateAsync: vi.fn() } as any);
-    vi.mocked(useSkillRepoDeleteMutation).mockReturnValue({ mutateAsync: vi.fn() } as any);
-
-    renderWithProviders(<SkillsMarketPage />);
-
-    fireEvent.click(screen.getByRole("button", { name: "刷新发现" }));
-    await waitFor(() => {
-      expect(discover.mutateAsync).toHaveBeenCalledWith(true);
-    });
-    expect(logToConsole).toHaveBeenCalled();
-    expect(toast).toHaveBeenCalledWith("已发现 2 个 Skill");
-
-    // actionable list hides enabled items by default; toggle to show them
-    fireEvent.click(screen.getByRole("switch"));
-    expect(screen.getByText("Baz")).toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole("button", { name: "安装到 Claude Code" }));
-    await waitFor(() => {
-      expect(install.mutateAsync).toHaveBeenCalledWith({
-        gitUrl: "https://github.com/acme/skills",
-        branch: "main",
-        sourceSubdir: "foo",
-        enabled: true,
-      });
-    });
-    expect(toast).toHaveBeenCalledWith("安装成功");
-
-    fireEvent.click(screen.getByRole("button", { name: "去启用" }));
-    expect(navigateMock).toHaveBeenCalledWith("/skills");
-  });
-
-  it("supports search/filter/sort and clearing query (including git@ urls and empty branch)", () => {
-    setTauriRuntime();
-    navigateMock.mockClear();
-
-    vi.mocked(useSkillReposListQuery).mockReturnValue({
-      data: [
-        {
-          id: 1,
-          git_url: "https://github.com/acme/skills",
-          branch: "main",
-          enabled: true,
-          created_at: 1,
-          updated_at: 2,
+          source_subdir: "skills/gamma",
         },
       ],
       isLoading: false,
     } as any);
-    vi.mocked(useWorkspacesListQuery).mockReturnValue({
-      data: { active_id: 7 },
-      isLoading: false,
-    } as any);
-    vi.mocked(useSkillsInstalledListQuery).mockReturnValue({ data: [], isLoading: false } as any);
     vi.mocked(useSkillsDiscoverAvailableQuery).mockReturnValue({
       data: [
         {
           name: "Alpha",
           description: "",
-          source_git_url: "git@github.com:acme/skills.git",
+          source_git_url: "https://github.com/acme/repo-one",
           source_branch: "main",
-          source_subdir: "alpha",
+          source_subdir: "skills/alpha",
+          installed: false,
+        },
+        {
+          name: "Gamma",
+          description: "",
+          source_git_url: "https://github.com/acme/repo-one",
+          source_branch: "main",
+          source_subdir: "skills/gamma",
           installed: false,
         },
         {
           name: "Beta",
           description: "",
-          source_git_url: "https://github.com/acme/skills",
-          source_branch: "",
-          source_subdir: "beta",
-          installed: false,
-        },
-        {
-          name: "EmptyUrl",
-          description: "",
-          source_git_url: "",
+          source_git_url: "https://github.com/acme/repo-two",
           source_branch: "main",
-          source_subdir: "empty",
-          installed: false,
+          source_subdir: "skills/beta",
+          installed: true,
         },
       ],
       isFetching: false,
     } as any);
 
-    vi.mocked(useSkillsDiscoverAvailableMutation).mockReturnValue({
-      isPending: false,
-      mutateAsync: vi.fn().mockResolvedValue([]),
-    } as any);
-
-    vi.mocked(useSkillRepoUpsertMutation).mockReturnValue({ mutateAsync: vi.fn() } as any);
-    vi.mocked(useSkillRepoDeleteMutation).mockReturnValue({ mutateAsync: vi.fn() } as any);
-    vi.mocked(useSkillInstallMutation).mockReturnValue({ mutateAsync: vi.fn() } as any);
-
-    renderWithProviders(<SkillsMarketPage />);
-
-    expect(screen.getByText("Alpha")).toBeInTheDocument();
-    expect(screen.getByText("Beta")).toBeInTheDocument();
-
-    const queryInput = screen.getByPlaceholderText("搜索 Skill（名称/描述/仓库/目录）");
-    fireEvent.change(queryInput, { target: { value: "zzz" } });
-    expect(screen.getByText(/没有匹配结果/)).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "清空" }));
-    expect(screen.getByText("Alpha")).toBeInTheDocument();
-
-    const [repoFilterSelect, sortSelect] = screen.getAllByRole("combobox");
-    fireEvent.change(sortSelect, { target: { value: "name" } });
-    fireEvent.change(sortSelect, { target: { value: "repo" } });
-
-    fireEvent.change(repoFilterSelect, {
-      target: { value: "https://github.com/acme/skills#" },
-    });
-    expect(screen.getByText("Beta")).toBeInTheDocument();
-    expect(screen.queryByText("Alpha")).not.toBeInTheDocument();
-  });
-
-  it("handles repo toggle and delete flows (including pending gating + formatUnixSeconds fallback)", async () => {
-    setTauriRuntime();
-    navigateMock.mockClear();
-
-    const repos = [
-      {
-        id: 1,
-        git_url: "git@github.com:acme/skills.git",
-        branch: "main",
-        enabled: true,
-        created_at: 1,
-        updated_at: 2,
-      },
-      {
-        id: 2,
-        git_url: "https://github.com/acme/skills",
-        branch: "dev",
-        enabled: false,
-        created_at: 1,
-        updated_at: 3,
-      },
-    ];
-
-    vi.mocked(useSkillReposListQuery).mockReturnValue({ data: repos, isLoading: false } as any);
-    vi.mocked(useWorkspacesListQuery).mockReturnValue({
-      data: { active_id: 7 },
-      isLoading: false,
-    } as any);
-    vi.mocked(useSkillsInstalledListQuery).mockReturnValue({ data: [], isLoading: false } as any);
-    vi.mocked(useSkillsDiscoverAvailableQuery).mockReturnValue({
-      data: [],
-      isFetching: false,
-    } as any);
-    vi.mocked(useSkillsDiscoverAvailableMutation).mockReturnValue({
-      isPending: false,
-      mutateAsync: vi.fn().mockResolvedValue([]),
-    } as any);
-
-    let resolveUpsert!: (value: unknown) => void;
-    const upsertPromise = new Promise((resolve) => {
-      resolveUpsert = resolve;
-    });
-    const repoUpsert = { isPending: false, mutateAsync: vi.fn().mockReturnValue(upsertPromise) };
-    vi.mocked(useSkillRepoUpsertMutation).mockReturnValue(repoUpsert as any);
-
-    const repoDelete = { mutateAsync: vi.fn() };
-    repoDelete.mutateAsync.mockResolvedValueOnce(false).mockResolvedValueOnce(true);
-    vi.mocked(useSkillRepoDeleteMutation).mockReturnValue(repoDelete as any);
-    vi.mocked(useSkillInstallMutation).mockReturnValue({ mutateAsync: vi.fn() } as any);
-
-    const localeSpy = vi.spyOn(Date.prototype, "toLocaleString").mockImplementation(() => {
-      throw new Error("boom");
-    });
+    const install = {
+      mutateAsync: vi.fn().mockResolvedValueOnce({
+        dir_name: "alpha",
+        path: "/tmp/alpha",
+        name: "Alpha",
+        description: "",
+        source_git_url: "https://github.com/acme/repo-one",
+        source_branch: "main",
+        source_subdir: "skills/alpha",
+      }),
+    };
+    vi.mocked(useSkillInstallToLocalMutation).mockReturnValue(install as any);
 
     renderWithProviders(<SkillsMarketPage />);
 
-    fireEvent.click(screen.getByRole("button", { name: "管理仓库" }));
-    const repoDialog = getDialogByTitle("Skill 仓库");
+    fireEvent.click(screen.getByRole("button", { name: "安装本仓库全部技能" }));
+    await waitFor(() => expect(install.mutateAsync).toHaveBeenCalledTimes(1));
+    expect(install.mutateAsync).toHaveBeenCalledWith({
+      gitUrl: "https://github.com/acme/repo-one",
+      branch: "main",
+      sourceSubdir: "skills/alpha",
+    });
+    expect(toast).toHaveBeenCalledWith("已安装 1 个技能到 Claude Code");
 
-    // formatUnixSeconds fallback branch
-    expect(repoDialog.textContent).toContain("更新 2");
-
-    const repoSwitches = within(repoDialog).getAllByRole("switch");
-    fireEvent.click(repoSwitches[0]);
-    fireEvent.click(repoSwitches[1]);
-    expect(repoUpsert.mutateAsync).toHaveBeenCalledTimes(1);
-    expect(repoUpsert.mutateAsync).toHaveBeenCalledWith(
-      expect.objectContaining({
-        repoId: 1,
-        gitUrl: "git@github.com:acme/skills.git",
-        branch: "main",
-      })
+    fireEvent.click(screen.getByRole("switch"));
+    const repoTwoSection = screen.getAllByText("acme/repo-two")[0]?.closest("section");
+    expect(repoTwoSection).not.toBeNull();
+    fireEvent.click(within(repoTwoSection as HTMLElement).getByRole("button", { name: "展开" }));
+    fireEvent.click(
+      within(repoTwoSection as HTMLElement).getByRole("button", { name: "去通用技能" })
     );
-
-    resolveUpsert(null);
-    await waitFor(() => expect(repoUpsert.mutateAsync).toHaveBeenCalledTimes(1));
-
-    // delete repo: first attempt returns false (silent return), second succeeds
-    const deleteButtons = within(repoDialog).getAllByRole("button", { name: "删除" });
-    fireEvent.click(deleteButtons[0]);
-    const deleteDialog = getDialogByTitle("删除仓库");
-
-    fireEvent.click(within(deleteDialog).getByRole("button", { name: "确认删除" }));
-    await waitFor(() => expect(repoDelete.mutateAsync).toHaveBeenCalledTimes(1));
-
-    fireEvent.click(within(deleteDialog).getByRole("button", { name: "确认删除" }));
-    await waitFor(() => expect(repoDelete.mutateAsync).toHaveBeenCalledTimes(2));
-    expect(toast).toHaveBeenCalledWith("仓库已删除");
-
-    localeSpy.mockRestore();
+    expect(navigateMock).toHaveBeenCalledWith("/skills");
   });
 
-  it("covers refresh/install null + error branches and localStorage failures", async () => {
+  it("ignores stale installed/local cache when the active workspace is missing", () => {
     setTauriRuntime();
     navigateMock.mockClear();
+    mockCommonState();
 
-    const getItemSpy = vi.spyOn(window.localStorage, "getItem").mockImplementation(() => {
-      throw new Error("boom");
-    });
-    const setItemSpy = vi.spyOn(window.localStorage, "setItem").mockImplementation(() => {
-      throw new Error("boom");
-    });
-
-    vi.mocked(useSkillReposListQuery).mockReturnValue({
-      data: [
-        {
-          id: 1,
-          git_url: "https://github.com/acme/skills",
-          branch: "main",
-          enabled: true,
-          created_at: 1,
-          updated_at: 2,
-        },
-      ],
-      isLoading: false,
-    } as any);
     vi.mocked(useWorkspacesListQuery).mockReturnValue({
       data: { active_id: null },
       isLoading: false,
     } as any);
-    vi.mocked(useSkillsInstalledListQuery).mockReturnValue({ data: [], isLoading: false } as any);
+    vi.mocked(useSkillsInstalledListQuery).mockReturnValue({
+      data: [
+        {
+          id: 101,
+          skill_key: "beta",
+          name: "Beta",
+          description: "",
+          source_git_url: "https://github.com/acme/repo-two",
+          source_branch: "main",
+          source_subdir: "skills/beta",
+          enabled: true,
+          created_at: 1,
+          updated_at: 1,
+        },
+      ],
+      isLoading: false,
+    } as any);
+    vi.mocked(useSkillsLocalListQuery).mockReturnValue({
+      data: [
+        {
+          dir_name: "gamma",
+          path: "/tmp/gamma",
+          name: "Gamma",
+          description: "",
+          source_git_url: "https://github.com/acme/repo-one",
+          source_branch: "main",
+          source_subdir: "skills/gamma",
+        },
+      ],
+      isLoading: false,
+    } as any);
     vi.mocked(useSkillsDiscoverAvailableQuery).mockReturnValue({
       data: [
         {
-          name: "Foo",
+          name: "Alpha",
           description: "",
-          source_git_url: "https://github.com/acme/skills",
+          source_git_url: "https://github.com/acme/repo-one",
           source_branch: "main",
-          source_subdir: "foo",
+          source_subdir: "skills/alpha",
           installed: false,
+        },
+        {
+          name: "Gamma",
+          description: "",
+          source_git_url: "https://github.com/acme/repo-one",
+          source_branch: "main",
+          source_subdir: "skills/gamma",
+          installed: false,
+        },
+        {
+          name: "Beta",
+          description: "",
+          source_git_url: "https://github.com/acme/repo-two",
+          source_branch: "main",
+          source_subdir: "skills/beta",
+          installed: true,
         },
       ],
       isFetching: false,
     } as any);
 
-    const discover = { isPending: false, mutateAsync: vi.fn() };
-    discover.mutateAsync.mockResolvedValueOnce(null).mockRejectedValueOnce(new Error("boom"));
-    vi.mocked(useSkillsDiscoverAvailableMutation).mockReturnValue(discover as any);
-
-    const install = { mutateAsync: vi.fn() };
-    install.mutateAsync.mockResolvedValueOnce(null).mockRejectedValueOnce(new Error("boom"));
-    vi.mocked(useSkillInstallMutation).mockReturnValue(install as any);
-
-    vi.mocked(useSkillRepoUpsertMutation).mockReturnValue({ mutateAsync: vi.fn() } as any);
-    vi.mocked(useSkillRepoDeleteMutation).mockReturnValue({ mutateAsync: vi.fn() } as any);
-
-    const phase1 = renderWithProviders(<SkillsMarketPage />);
-
-    // discover returns null => silent return
-    fireEvent.click(screen.getByRole("button", { name: "刷新发现" }));
-    await waitFor(() => expect(discover.mutateAsync).toHaveBeenCalledTimes(1));
-
-    // discover rejects => error toast
-    fireEvent.click(screen.getByRole("button", { name: "刷新发现" }));
-    await waitFor(() => expect(discover.mutateAsync).toHaveBeenCalledTimes(2));
-
-    // install without active workspace => workspace-missing toast
-    fireEvent.click(screen.getByRole("button", { name: "安装到 Claude Code" }));
-    await waitFor(() =>
-      expect(toast).toHaveBeenCalledWith(
-        "未找到当前工作区（workspace）。请先在 Workspaces 页面创建并设为当前。"
-      )
-    );
-
-    vi.mocked(useWorkspacesListQuery).mockReturnValue({
-      data: { active_id: 7 },
-      isLoading: false,
-    } as any);
-
-    // writeCliToStorage catches localStorage.setItem failures
-    fireEvent.click(screen.getByRole("tab", { name: "Codex" }));
-
-    // install returns null => silent return
-    fireEvent.click(screen.getByRole("button", { name: "安装到 Codex" }));
-    await waitFor(() => expect(install.mutateAsync).toHaveBeenCalledTimes(1));
-
-    phase1.unmount();
-    getItemSpy.mockRestore();
-    setItemSpy.mockRestore();
-
-    // phase2: exercise install error branch
-    try {
-      window.localStorage.removeItem("skills.activeCli");
-    } catch {}
-    vi.mocked(toast).mockClear();
-    vi.mocked(useWorkspacesListQuery).mockReturnValue({
-      data: { active_id: 7 },
-      isLoading: false,
-    } as any);
-
     renderWithProviders(<SkillsMarketPage />);
 
-    // install rejects => error toast
-    fireEvent.click(screen.getByRole("button", { name: "安装到 Claude Code" }));
-    await waitFor(() => expect(install.mutateAsync).toHaveBeenCalledTimes(2));
-    await waitFor(() => expect(toast).toHaveBeenCalled());
+    expect(screen.getByText(/当前还没有激活的 workspace/)).toBeInTheDocument();
+    expect(screen.queryByText("本机 1")).not.toBeInTheDocument();
+    expect(screen.queryByText("通用已启用 1")).not.toBeInTheDocument();
+
+    const repoTwoSection = screen.getAllByText("acme/repo-two")[0]?.closest("section");
+    expect(repoTwoSection).not.toBeNull();
+    fireEvent.click(within(repoTwoSection as HTMLElement).getByRole("button", { name: "展开" }));
+    expect(
+      within(repoTwoSection as HTMLElement).getByRole("button", { name: "安装到 Claude Code" })
+    ).toBeInTheDocument();
+    expect(
+      within(repoTwoSection as HTMLElement).queryByRole("button", { name: "去通用技能" })
+    ).not.toBeInTheDocument();
   });
 });
