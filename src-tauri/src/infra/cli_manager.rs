@@ -260,10 +260,30 @@ fn exe_names_for(cmd: &str) -> Vec<String> {
     }
 }
 
+fn is_path_executable(path: &Path) -> bool {
+    let Ok(meta) = std::fs::metadata(path) else {
+        return false;
+    };
+    if !meta.is_file() {
+        return false;
+    }
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        meta.permissions().mode() & 0o111 != 0
+    }
+
+    #[cfg(not(unix))]
+    {
+        true
+    }
+}
+
 fn find_exe_in_dir(dir: &Path, names: &[String]) -> Option<PathBuf> {
     for name in names {
         let p = dir.join(name);
-        if p.exists() {
+        if is_path_executable(&p) {
             return Some(p);
         }
     }
@@ -428,7 +448,7 @@ fn resolve_executable_via_login_shell(
     }
 
     let candidate = PathBuf::from(first);
-    if candidate.exists() {
+    if is_path_executable(&candidate) {
         return Ok(Some(candidate));
     }
 
@@ -566,4 +586,54 @@ pub fn claude_env_set<R: tauri::Runtime>(
         mcp_timeout_ms,
         disable_error_reporting,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use tempfile::tempdir;
+
+    #[test]
+    fn find_exe_in_dir_ignores_directory_named_like_command() {
+        let dir = tempdir().expect("tempdir");
+        fs::create_dir(dir.path().join("codex")).expect("create command-like directory");
+
+        let names = vec!["codex".to_string()];
+        assert_eq!(find_exe_in_dir(dir.path(), &names), None);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn find_exe_in_dir_ignores_non_executable_file_on_unix() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempdir().expect("tempdir");
+        let path = dir.path().join("codex");
+        fs::write(&path, "#!/bin/sh\nexit 0\n").expect("write file");
+
+        let mut perms = fs::metadata(&path).expect("metadata").permissions();
+        perms.set_mode(0o644);
+        fs::set_permissions(&path, perms).expect("set non-executable permissions");
+
+        let names = vec!["codex".to_string()];
+        assert_eq!(find_exe_in_dir(dir.path(), &names), None);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn find_exe_in_dir_accepts_executable_file_on_unix() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempdir().expect("tempdir");
+        let path = dir.path().join("codex");
+        fs::write(&path, "#!/bin/sh\nexit 0\n").expect("write file");
+
+        let mut perms = fs::metadata(&path).expect("metadata").permissions();
+        perms.set_mode(0o755);
+        fs::set_permissions(&path, perms).expect("set executable permissions");
+
+        let names = vec!["codex".to_string()];
+        assert_eq!(find_exe_in_dir(dir.path(), &names), Some(path));
+    }
 }

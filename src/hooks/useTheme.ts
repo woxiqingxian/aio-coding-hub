@@ -5,17 +5,38 @@ type Theme = "light" | "dark" | "system";
 
 const STORAGE_KEY = "aio-theme";
 
+function canUseWindow(): boolean {
+  return typeof window !== "undefined";
+}
+
+function normalizeTheme(value: unknown): Theme {
+  return value === "light" || value === "dark" || value === "system" ? value : "system";
+}
+
 // ---------------------------------------------------------------------------
 // Module-level shared store — single source of truth for ALL useTheme() calls
 // ---------------------------------------------------------------------------
 
 function getSystemTheme(): "light" | "dark" {
-  return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+  if (!canUseWindow() || typeof window.matchMedia !== "function") {
+    return "light";
+  }
+
+  try {
+    return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+  } catch {
+    return "light";
+  }
 }
 
 function readStoredTheme(): Theme {
-  const stored = localStorage.getItem(STORAGE_KEY);
-  return (stored as Theme) || "system";
+  if (!canUseWindow()) return "system";
+
+  try {
+    return normalizeTheme(window.localStorage.getItem(STORAGE_KEY));
+  } catch {
+    return "system";
+  }
 }
 
 interface ThemeSnapshot {
@@ -73,7 +94,9 @@ function syncNativeTheme(theme: Theme) {
 
 function applyTheme(theme: Theme) {
   const resolved = resolve(theme);
-  document.documentElement.classList.toggle("dark", resolved === "dark");
+  if (typeof document !== "undefined") {
+    document.documentElement.classList.toggle("dark", resolved === "dark");
+  }
   syncNativeTheme(theme);
 }
 
@@ -82,7 +105,11 @@ function applyTheme(theme: Theme) {
 // ---------------------------------------------------------------------------
 
 function setThemeInternal(next: Theme) {
-  localStorage.setItem(STORAGE_KEY, next);
+  if (canUseWindow()) {
+    try {
+      window.localStorage.setItem(STORAGE_KEY, next);
+    } catch {}
+  }
   applyTheme(next);
   currentSnapshot = { theme: next, resolvedTheme: resolve(next) };
   emitChange();
@@ -92,19 +119,29 @@ function setThemeInternal(next: Theme) {
 // System theme media query listener (singleton, always active)
 // ---------------------------------------------------------------------------
 
-if (typeof window !== "undefined") {
-  const mq = window.matchMedia("(prefers-color-scheme: dark)");
-  mq.addEventListener("change", () => {
-    // Only react when the user preference is "system"
-    if (currentSnapshot.theme !== "system") return;
-    applyTheme("system");
-    const newResolved = getSystemTheme();
-    if (currentSnapshot.resolvedTheme !== newResolved) {
-      currentSnapshot = { ...currentSnapshot, resolvedTheme: newResolved };
-      emitChange();
-    }
-  });
+if (canUseWindow() && typeof window.matchMedia === "function") {
+  try {
+    const mq = window.matchMedia("(prefers-color-scheme: dark)");
+    const handleThemeChange = () => {
+      // Only react when the user preference is "system"
+      if (currentSnapshot.theme !== "system") return;
+      applyTheme("system");
+      const newResolved = getSystemTheme();
+      if (currentSnapshot.resolvedTheme !== newResolved) {
+        currentSnapshot = { ...currentSnapshot, resolvedTheme: newResolved };
+        emitChange();
+      }
+    };
 
+    if (typeof mq.addEventListener === "function") {
+      mq.addEventListener("change", handleThemeChange);
+    } else if (typeof mq.addListener === "function") {
+      mq.addListener(handleThemeChange);
+    }
+  } catch {}
+}
+
+if (canUseWindow()) {
   // Apply theme on module load to ensure DOM is in sync
   applyTheme(currentSnapshot.theme);
 }
