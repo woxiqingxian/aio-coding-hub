@@ -19,6 +19,7 @@ import { logToConsole } from "../../services/consoleLog";
 import {
   providerGetApiKey,
   providerUpsert,
+  providerDelete,
   providerOAuthStartFlow,
   providerOAuthRefresh,
   providerOAuthDisconnect,
@@ -679,6 +680,36 @@ export function ProviderEditorDialog(props: ProviderEditorDialogProps) {
 
   async function handleOAuthLogin() {
     setOauthLoading(true);
+    let autoSavedProviderId: number | null = null;
+    let shouldRollbackAutoSavedProvider = false;
+
+    const rollbackAutoSavedProvider = async () => {
+      if (!shouldRollbackAutoSavedProvider || !autoSavedProviderId) return;
+      try {
+        const deleted = await providerDelete(autoSavedProviderId);
+        if (!deleted) {
+          logToConsole(
+            "warn",
+            `OAuth 登录失败后清理临时 Provider 失败：${form.getValues().name || "OAuth Provider"}`,
+            {
+              cli_key: cliKey,
+              provider_id: autoSavedProviderId,
+            }
+          );
+        }
+      } catch (cleanupErr) {
+        logToConsole(
+          "error",
+          `OAuth 登录失败后清理临时 Provider 异常：${form.getValues().name || "OAuth Provider"}`,
+          {
+            cli_key: cliKey,
+            provider_id: autoSavedProviderId,
+            error: String(cleanupErr),
+          }
+        );
+      }
+    };
+
     try {
       let targetProviderId = editingProviderId;
 
@@ -715,12 +746,31 @@ export function ProviderEditorDialog(props: ProviderEditorDialogProps) {
           return;
         }
         targetProviderId = saved.id;
+        autoSavedProviderId = saved.id;
+        shouldRollbackAutoSavedProvider = true;
       }
 
       const result = await providerOAuthStartFlow(cliKey, targetProviderId);
       if (result?.success) {
-        const status = await providerOAuthStatus(targetProviderId);
-        setOauthStatus(status);
+        shouldRollbackAutoSavedProvider = false;
+
+        let status: Awaited<ReturnType<typeof providerOAuthStatus>> = null;
+        try {
+          status = await providerOAuthStatus(targetProviderId);
+          setOauthStatus(status);
+        } catch (statusErr) {
+          toast("OAuth 登录成功，但读取连接状态失败，可稍后重试");
+          logToConsole(
+            "warn",
+            `OAuth 登录后读取状态失败：${form.getValues().name || "OAuth Provider"}`,
+            {
+              cli_key: cliKey,
+              provider_id: targetProviderId,
+              provider_type: result.provider_type,
+              error: String(statusErr),
+            }
+          );
+        }
 
         let limits: Awaited<ReturnType<typeof providerOAuthFetchLimits>> = null;
         try {
@@ -769,6 +819,7 @@ export function ProviderEditorDialog(props: ProviderEditorDialogProps) {
           onOpenChange(false);
         }
       } else {
+        await rollbackAutoSavedProvider();
         toast("OAuth 登录失败");
         logToConsole("warn", `OAuth 登录失败：${form.getValues().name || "OAuth Provider"}`, {
           cli_key: cliKey,
@@ -776,6 +827,7 @@ export function ProviderEditorDialog(props: ProviderEditorDialogProps) {
         });
       }
     } catch (err) {
+      await rollbackAutoSavedProvider();
       toast(`OAuth 登录失败：${String(err)}`);
       logToConsole("error", `OAuth 登录异常：${form.getValues().name || "OAuth Provider"}`, {
         cli_key: cliKey,

@@ -89,3 +89,32 @@ fn settings_update_preserves_unmodified_fields() {
         json_bool(&defaults, "auto_start")
     );
 }
+
+#[test]
+fn settings_cache_does_not_leak_across_distinct_app_paths() {
+    {
+        let app = support::TestApp::new();
+        let handle = app.handle();
+
+        let mut update =
+            aio_coding_hub_lib::test_support::settings_get_json(&handle).expect("read defaults");
+        update["preferred_port"] = serde_json::json!(39001);
+
+        let persisted =
+            aio_coding_hub_lib::test_support::settings_set_json(&handle, update).expect("update");
+        assert_eq!(json_i64(&persisted, "preferred_port"), 39001);
+    }
+
+    {
+        let app = support::TestApp::new();
+        let handle = app.handle();
+
+        let settings =
+            aio_coding_hub_lib::test_support::settings_get_json(&handle).expect("read defaults");
+        assert_eq!(
+            json_i64(&settings, "preferred_port"),
+            37123,
+            "settings cache should be scoped by settings.json path"
+        );
+    }
+}

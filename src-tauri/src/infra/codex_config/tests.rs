@@ -27,13 +27,15 @@ fn empty_patch() -> CodexConfigPatch {
 
 fn make_test_state(input: &str) -> crate::shared::error::AppResult<CodexConfigState> {
     make_state_from_bytes(
-        "dir".to_string(),
-        "path".to_string(),
-        "C:\\Users\\MyPC\\.codex".to_string(),
-        "C:\\Users\\MyPC\\.codex\\config.toml".to_string(),
-        "D:\\Work\\.codex".to_string(),
-        "D:\\Work\\.codex\\config.toml".to_string(),
-        true,
+        CodexConfigStateMeta {
+            config_dir: "dir".to_string(),
+            config_path: "path".to_string(),
+            user_home_default_dir: "C:\\Users\\MyPC\\.codex".to_string(),
+            user_home_default_path: "C:\\Users\\MyPC\\.codex\\config.toml".to_string(),
+            follow_codex_home_dir: "D:\\Work\\.codex".to_string(),
+            follow_codex_home_path: "D:\\Work\\.codex\\config.toml".to_string(),
+            can_open_config_dir: true,
+        },
         Some(input.as_bytes().to_vec()),
     )
 }

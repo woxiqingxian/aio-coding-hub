@@ -516,6 +516,34 @@ pub(crate) async fn base_url_ping_ms(base_url: String) -> Result<u64, String> {
     base_url_probe::probe_base_url_ms(&client, &base_url, std::time::Duration::from_secs(3)).await
 }
 
+fn build_oauth_authorize_url(
+    endpoints: &crate::gateway::oauth::provider_trait::OAuthEndpoints,
+    redirect_uri: &str,
+    oauth_state: &str,
+    code_challenge: &str,
+    extra_params: &[(&'static str, &'static str)],
+) -> String {
+    let scopes = endpoints.scopes.join(" ");
+    let mut authorize_url = format!(
+        "{}?client_id={}&redirect_uri={}&response_type=code&scope={}&state={}&code_challenge={}&code_challenge_method=S256",
+        endpoints.auth_url,
+        crate::gateway::util::encode_url_component(&endpoints.client_id),
+        crate::gateway::util::encode_url_component(redirect_uri),
+        crate::gateway::util::encode_url_component(&scopes),
+        crate::gateway::util::encode_url_component(oauth_state),
+        crate::gateway::util::encode_url_component(code_challenge),
+    );
+
+    for (key, value) in extra_params {
+        authorize_url.push('&');
+        authorize_url.push_str(&crate::gateway::util::encode_url_component(key));
+        authorize_url.push('=');
+        authorize_url.push_str(&crate::gateway::util::encode_url_component(value));
+    }
+
+    authorize_url
+}
+
 #[tauri::command]
 pub(crate) async fn provider_oauth_start_flow(
     app: tauri::AppHandle,
@@ -574,34 +602,15 @@ pub(crate) async fn provider_oauth_start_flow(
         crate::gateway::oauth::provider_trait::make_redirect_uri(endpoints, listener.port);
 
     // 5. Build authorize URL
-    let scopes = endpoints.scopes.join(" ");
-    let mut authorize_url = format!(
-        "{}?client_id={}&redirect_uri={}&response_type=code&scope={}&state={}&code_challenge={}&code_challenge_method=S256",
-        endpoints.auth_url,
-        crate::gateway::util::encode_url_component(&endpoints.client_id),
-        crate::gateway::util::encode_url_component(&redirect_uri),
-        crate::gateway::util::encode_url_component(&scopes),
-        crate::gateway::util::encode_url_component(&oauth_state),
-        crate::gateway::util::encode_url_component(&pkce.code_challenge),
+    // 对齐官方 Codex 登录 URL 形状，不再强制追加 prompt=login。
+    // 这样可避免偏离上游登录流，降低浏览器端 unknown_error 风险。
+    let authorize_url = build_oauth_authorize_url(
+        endpoints,
+        &redirect_uri,
+        &oauth_state,
+        &pkce.code_challenge,
+        &adapter.extra_authorize_params(),
     );
-
-    for (key, value) in adapter.extra_authorize_params() {
-        authorize_url.push('&');
-        authorize_url.push_str(&crate::gateway::util::encode_url_component(key));
-        authorize_url.push('=');
-        authorize_url.push_str(&crate::gateway::util::encode_url_component(value));
-    }
-
-    // Force a fresh login session to avoid stale PKCE/state conflicts on retry,
-    // but only if the adapter hasn't already set a `prompt` parameter (e.g. Gemini
-    // uses `prompt=consent` to guarantee refresh token issuance from Google).
-    let adapter_sets_prompt = adapter
-        .extra_authorize_params()
-        .iter()
-        .any(|(k, _)| *k == "prompt");
-    if !adapter_sets_prompt {
-        authorize_url.push_str("&prompt=login");
-    }
 
     // 6. Open browser
     let _ = tauri_plugin_opener::open_url(&authorize_url, None::<&str>);
@@ -1159,6 +1168,51 @@ mod tests {
             normalize_oauth_short_window_label("codex", Some("custom")).as_deref(),
             Some("custom")
         );
+    }
+
+    #[test]
+    fn build_oauth_authorize_url_keeps_extra_params_without_forcing_prompt_login() {
+        let endpoints = crate::gateway::oauth::provider_trait::OAuthEndpoints {
+            auth_url: "https://auth.openai.com/oauth/authorize",
+            token_url: "https://auth.openai.com/oauth/token",
+            client_id: "client_123".to_string(),
+            client_secret: None,
+            scopes: vec![
+                "openid",
+                "profile",
+                "email",
+                "offline_access",
+                "api.connectors.read",
+                "api.connectors.invoke",
+            ],
+            redirect_host: "localhost",
+            callback_path: "/auth/callback",
+            default_callback_port: 1455,
+        };
+
+        let authorize_url = build_oauth_authorize_url(
+            &endpoints,
+            "http://localhost:1455/auth/callback",
+            "state_abc",
+            "challenge_xyz",
+            &[
+                ("id_token_add_organizations", "true"),
+                ("codex_cli_simplified_flow", "true"),
+                ("originator", "codex_cli_rs"),
+            ],
+        );
+
+        assert!(authorize_url.contains("response_type=code"));
+        assert!(
+            authorize_url.contains("redirect_uri=http%3A%2F%2Flocalhost%3A1455%2Fauth%2Fcallback")
+        );
+        assert!(authorize_url.contains(
+            "scope=openid%20profile%20email%20offline_access%20api.connectors.read%20api.connectors.invoke"
+        ));
+        assert!(authorize_url.contains("id_token_add_organizations=true"));
+        assert!(authorize_url.contains("codex_cli_simplified_flow=true"));
+        assert!(authorize_url.contains("originator=codex_cli_rs"));
+        assert!(!authorize_url.contains("prompt=login"));
     }
 
     #[test]
