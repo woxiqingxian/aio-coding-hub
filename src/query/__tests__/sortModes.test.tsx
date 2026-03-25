@@ -6,6 +6,9 @@ import {
   sortModeActiveSet,
   sortModeCreate,
   sortModeDelete,
+  sortModeProviderSetEnabled,
+  sortModeProvidersList,
+  sortModeProvidersSetOrder,
   sortModeRename,
   sortModesList,
 } from "../../services/sortModes";
@@ -14,10 +17,14 @@ import { createQueryWrapper, createTestQueryClient } from "../../test/utils/reac
 import { setTauriRuntime } from "../../test/utils/tauriRuntime";
 import { sortModesKeys } from "../keys";
 import {
+  sortModeProvidersQueryKey,
   useSortModeActiveListQuery,
   useSortModeActiveSetMutation,
   useSortModeCreateMutation,
   useSortModeDeleteMutation,
+  useSortModeProviderSetEnabledMutation,
+  useSortModeProvidersListQuery,
+  useSortModeProvidersSetOrderMutation,
   useSortModeRenameMutation,
   useSortModesListQuery,
 } from "../sortModes";
@@ -34,6 +41,9 @@ vi.mock("../../services/sortModes", async () => {
     sortModeCreate: vi.fn(),
     sortModeRename: vi.fn(),
     sortModeDelete: vi.fn(),
+    sortModeProvidersList: vi.fn(),
+    sortModeProvidersSetOrder: vi.fn(),
+    sortModeProviderSetEnabled: vi.fn(),
   };
 });
 
@@ -53,6 +63,23 @@ describe("query/sortModes", () => {
     await waitFor(() => {
       expect(sortModesList).toHaveBeenCalled();
       expect(sortModeActiveList).toHaveBeenCalled();
+    });
+  });
+
+  it("calls sortModeProvidersList with tauri runtime", async () => {
+    setTauriRuntime();
+
+    vi.mocked(sortModeProvidersList).mockResolvedValue([
+      { provider_id: 101, enabled: true },
+    ] as any);
+
+    const client = createTestQueryClient();
+    const wrapper = createQueryWrapper(client);
+
+    renderHook(() => useSortModeProvidersListQuery({ modeId: 1, cliKey: "claude" }), { wrapper });
+
+    await waitFor(() => {
+      expect(sortModeProvidersList).toHaveBeenCalledWith({ mode_id: 1, cli_key: "claude" });
     });
   });
 
@@ -252,5 +279,68 @@ describe("query/sortModes", () => {
     expect(sortModeDelete).toHaveBeenCalledWith({ mode_id: 3 });
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: sortModesKeys.list() });
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: sortModesKeys.activeList() });
+  });
+
+  it("useSortModeProvidersSetOrderMutation invalidates the provider list on settle", async () => {
+    setTauriRuntime();
+
+    vi.mocked(sortModeProvidersSetOrder).mockResolvedValue([
+      { provider_id: 101, enabled: true },
+    ] as any);
+
+    const client = createTestQueryClient();
+    const invalidateSpy = vi.spyOn(client, "invalidateQueries");
+    const wrapper = createQueryWrapper(client);
+
+    const { result } = renderHook(() => useSortModeProvidersSetOrderMutation(), { wrapper });
+    await act(async () => {
+      await result.current.mutateAsync({
+        modeId: 3,
+        cliKey: "codex",
+        orderedProviderIds: [101],
+      });
+    });
+
+    expect(sortModeProvidersSetOrder).toHaveBeenCalledWith({
+      mode_id: 3,
+      cli_key: "codex",
+      ordered_provider_ids: [101],
+    });
+    expect(invalidateSpy).toHaveBeenCalledWith({
+      queryKey: sortModeProvidersQueryKey(3, "codex"),
+    });
+  });
+
+  it("useSortModeProviderSetEnabledMutation invalidates the provider list on settle", async () => {
+    setTauriRuntime();
+
+    vi.mocked(sortModeProviderSetEnabled).mockResolvedValue({
+      provider_id: 101,
+      enabled: false,
+    } as any);
+
+    const client = createTestQueryClient();
+    const invalidateSpy = vi.spyOn(client, "invalidateQueries");
+    const wrapper = createQueryWrapper(client);
+
+    const { result } = renderHook(() => useSortModeProviderSetEnabledMutation(), { wrapper });
+    await act(async () => {
+      await result.current.mutateAsync({
+        modeId: 4,
+        cliKey: "gemini",
+        providerId: 101,
+        enabled: false,
+      });
+    });
+
+    expect(sortModeProviderSetEnabled).toHaveBeenCalledWith({
+      mode_id: 4,
+      cli_key: "gemini",
+      provider_id: 101,
+      enabled: false,
+    });
+    expect(invalidateSpy).toHaveBeenCalledWith({
+      queryKey: sortModeProvidersQueryKey(4, "gemini"),
+    });
   });
 });

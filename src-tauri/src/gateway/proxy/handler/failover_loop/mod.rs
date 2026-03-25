@@ -3,10 +3,12 @@
 mod attempt_record;
 mod claude_metadata_user_id_injection;
 mod claude_model_mapping;
+mod codex_chatgpt;
 mod codex_session_id_completion;
 mod context;
 mod event_helpers;
 mod finalize;
+mod oauth;
 mod provider_gate;
 mod provider_limits;
 mod request_end_helpers;
@@ -22,9 +24,19 @@ use attempt_record::{
     record_system_failure_and_decide, record_system_failure_and_decide_no_cooldown,
     RecordSystemFailureArgs,
 };
+use codex_chatgpt::{
+    is_codex_chatgpt_backend, maybe_apply_codex_chatgpt_request_compat,
+    maybe_inject_codex_chatgpt_headers, original_anthropic_stream_requested,
+    parse_codex_chatgpt_account_id, should_apply_claude_model_mapping,
+    strip_incompatible_protocol_headers,
+};
 use event_helpers::{
     emit_attempt_event_and_log, emit_attempt_event_and_log_with_circuit_before,
     AttemptCircuitFields,
+};
+use oauth::{
+    refresh_oauth_credential_after_401, resolve_effective_credential,
+    resolve_oauth_adapter_for_provider,
 };
 use request_end_helpers::{
     emit_request_event_and_enqueue_request_log, RequestEndArgs, RequestEndDeps,
@@ -44,11 +56,9 @@ use super::super::{
 use crate::usage;
 use axum::{
     body::{Body, Bytes},
-    http::{header, HeaderMap, HeaderName, HeaderValue, StatusCode},
+    http::{header, HeaderMap, HeaderValue, StatusCode},
     response::{IntoResponse, Response},
 };
-use base64::engine::general_purpose::URL_SAFE_NO_PAD;
-use base64::Engine;
 use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
@@ -97,409 +107,43 @@ fn finalize_owned_from_input(input: &RequestContext) -> FinalizeOwnedCommon {
     }
 }
 
-// ── OAuth credential resolution helpers ──
-
-const CODEX_ORIGINATOR_HEADER_VALUE: &str = "codex_cli_rs";
-
-fn resolve_oauth_adapter_for_provider(
-    cli_key: &str,
+struct SkippedProviderAttempt<'a> {
     provider_id: i64,
-    oauth_provider_type: Option<&str>,
-) -> crate::shared::error::AppResult<
-    &'static dyn crate::gateway::oauth::provider_trait::OAuthProvider,
-> {
-    crate::gateway::oauth::registry::resolve_oauth_adapter(
-        cli_key,
-        provider_id,
-        oauth_provider_type,
-    )
-    .map_err(Into::into)
+    provider_name: &'a str,
+    base_url: &'a str,
+    error_category: &'static str,
+    error_code: &'static str,
+    reason: String,
+    reason_code: Option<&'static str>,
+    attempt_started_ms: u128,
 }
 
-/// Resolve the effective API credential for a provider.
-/// For `api_key` mode, returns the plaintext key.
-/// For `oauth` mode, checks token freshness and refreshes inline if needed.
-async fn resolve_effective_credential(
-    state: &crate::gateway::manager::GatewayAppState,
-    cli_key: &str,
-    provider: &crate::providers::ProviderForGateway,
-) -> crate::shared::error::AppResult<String> {
-    if provider.auth_mode != "oauth" {
-        let api_key = provider.api_key_plaintext.trim();
-        if api_key.is_empty() {
-            return Err("SEC_INVALID_INPUT: provider api_key is empty"
-                .to_string()
-                .into());
-        }
-        return Ok(api_key.to_string());
-    }
-
-    // OAuth mode: load details from DB and refresh if needed.
-    let details = crate::providers::get_oauth_details(&state.db, provider.id)?;
-    if details.cli_key != cli_key {
-        return Err(format!(
-            "SEC_INVALID_STATE: oauth details cli_key mismatch for provider_id={} (expected={cli_key}, actual={})",
-            provider.id, details.cli_key
-        )
-        .into());
-    }
-    let oauth_adapter = resolve_oauth_adapter_for_provider(
-        cli_key,
-        provider.id,
-        Some(details.oauth_provider_type.as_str()),
-    )?;
-
-    let raw_token = details.oauth_access_token.trim().to_string();
-    if raw_token.is_empty() {
-        return Err("SEC_INVALID_INPUT: oauth access_token is empty"
-            .to_string()
-            .into());
-    }
-
-    // All OAuth providers use the raw access_token as the effective credential.
-    // For Codex, the access_token is used as Bearer token (per official Codex CLI).
-    // The id_token is only used for extracting chatgpt_account_id (handled separately).
-    let token = raw_token;
-
-    let now_unix = now_unix_seconds() as i64;
-    if crate::gateway::oauth::refresh::should_refresh_now(
-        details.oauth_expires_at,
-        details.oauth_refresh_lead_s,
-    ) {
-        // Attempt inline refresh.
-        if let (Some(ref refresh_token), Some(ref token_uri)) =
-            (&details.oauth_refresh_token, &details.oauth_token_uri)
-        {
-            if !refresh_token.trim().is_empty() && !token_uri.trim().is_empty() {
-                match crate::gateway::oauth::refresh::refresh_provider_token_with_retry(
-                    &state.client,
-                    token_uri,
-                    details.oauth_client_id.as_deref().unwrap_or(""),
-                    details.oauth_client_secret.as_deref(),
-                    refresh_token,
-                )
-                .await
-                {
-                    Ok(refreshed) => {
-                        let new_token = refreshed.access_token.trim().to_string();
-                        if !new_token.is_empty() {
-                            // Persist refreshed tokens via CAS (avoid concurrent overwrite).
-                            match crate::providers::update_oauth_tokens_if_last_refreshed_matches(
-                                &state.db,
-                                provider.id,
-                                "oauth",
-                                oauth_adapter.provider_type(),
-                                &new_token,
-                                refreshed.refresh_token.as_deref().or(Some(refresh_token)),
-                                refreshed
-                                    .id_token
-                                    .as_deref()
-                                    .or(details.oauth_id_token.as_deref()),
-                                token_uri,
-                                details.oauth_client_id.as_deref().unwrap_or(""),
-                                details.oauth_client_secret.as_deref(),
-                                refreshed.expires_at.or(details.oauth_expires_at),
-                                details.oauth_email.as_deref(),
-                                details.oauth_last_refreshed_at,
-                            ) {
-                                Ok(true) => {}
-                                Ok(false) => {
-                                    tracing::info!(
-                                        cli_key = %cli_key,
-                                        provider_id = provider.id,
-                                        "OAuth inline refresh CAS conflict: skipped stale token write"
-                                    );
-                                }
-                                Err(persist_err) => {
-                                    tracing::warn!(
-                                        cli_key = %cli_key,
-                                        provider_id = provider.id,
-                                        "OAuth token refresh persisted failed: {}",
-                                        persist_err
-                                    );
-                                }
-                            }
-                            tracing::info!(
-                                cli_key = %cli_key,
-                                provider_id = provider.id,
-                                "OAuth token refreshed inline successfully"
-                            );
-                            // All providers use the refreshed access_token as credential.
-                            return Ok(new_token);
-                        }
-                    }
-                    Err(err) => {
-                        // Refresh failed — check if current token is still valid.
-                        let still_valid = details
-                            .oauth_expires_at
-                            .map(|exp| exp > now_unix)
-                            .unwrap_or(false);
-                        if still_valid {
-                            tracing::warn!(
-                                provider_id = provider.id,
-                                cli_key = %cli_key,
-                                "oauth inline refresh failed; fallback to existing token: {}",
-                                err
-                            );
-                            return Ok(token);
-                        }
-                        return Err(format!("OAUTH_REFRESH_FAILED: {err}").into());
-                    }
-                }
-            }
-        }
-    }
-
-    Ok(token)
-}
-
-/// After a 401 response, attempt to refresh OAuth token and return the new credential.
-async fn refresh_oauth_credential_after_401(
-    state: &crate::gateway::manager::GatewayAppState,
-    cli_key: &str,
-    provider: &crate::providers::ProviderForGateway,
-) -> crate::shared::error::AppResult<String> {
-    if provider.auth_mode != "oauth" {
-        return Err("SEC_INVALID_INPUT: provider is not oauth mode"
-            .to_string()
-            .into());
-    }
-
-    let details = crate::providers::get_oauth_details(&state.db, provider.id)?;
-    if details.cli_key != cli_key {
-        return Err(format!(
-            "SEC_INVALID_STATE: oauth details cli_key mismatch for provider_id={} (expected={cli_key}, actual={})",
-            provider.id, details.cli_key
-        )
-        .into());
-    }
-    let oauth_adapter = resolve_oauth_adapter_for_provider(
-        cli_key,
-        provider.id,
-        Some(details.oauth_provider_type.as_str()),
-    )?;
-
-    let (refresh_token, token_uri) = match (&details.oauth_refresh_token, &details.oauth_token_uri)
-    {
-        (Some(rt), Some(tu)) if !rt.trim().is_empty() && !tu.trim().is_empty() => (rt, tu),
-        _ => {
-            tracing::warn!(
-                provider_id = provider.id,
-                has_refresh_token = details
-                    .oauth_refresh_token
-                    .as_ref()
-                    .map(|t| !t.trim().is_empty())
-                    .unwrap_or(false),
-                has_token_uri = details
-                    .oauth_token_uri
-                    .as_ref()
-                    .map(|t| !t.trim().is_empty())
-                    .unwrap_or(false),
-                "oauth 401 refresh aborted: missing refresh_token or token_uri"
-            );
-            return Err(
-                "OAUTH_REFRESH_FAILED: no refresh_token or token_uri available"
-                    .to_string()
-                    .into(),
-            );
-        }
-    };
-
-    let refreshed = crate::gateway::oauth::refresh::refresh_provider_token_with_retry(
-        &state.client,
-        token_uri,
-        details.oauth_client_id.as_deref().unwrap_or(""),
-        details.oauth_client_secret.as_deref(),
-        refresh_token,
-    )
-    .await
-    .map_err(|e| format!("OAUTH_REFRESH_FAILED: {e}"))?;
-
-    let new_token = refreshed.access_token.trim().to_string();
-    if new_token.is_empty() {
-        return Err("OAUTH_REFRESH_FAILED: refreshed access_token is empty"
-            .to_string()
-            .into());
-    }
-
-    match crate::providers::update_oauth_tokens_if_last_refreshed_matches(
-        &state.db,
-        provider.id,
-        "oauth",
-        oauth_adapter.provider_type(),
-        &new_token,
-        refreshed.refresh_token.as_deref().or(Some(refresh_token)),
-        refreshed
-            .id_token
-            .as_deref()
-            .or(details.oauth_id_token.as_deref()),
-        token_uri,
-        details.oauth_client_id.as_deref().unwrap_or(""),
-        details.oauth_client_secret.as_deref(),
-        refreshed.expires_at.or(details.oauth_expires_at),
-        details.oauth_email.as_deref(),
-        details.oauth_last_refreshed_at,
-    ) {
-        Ok(true) => {}
-        Ok(false) => {
-            tracing::info!(
-                provider_id = provider.id,
-                "oauth 401 refresh: CAS conflict, skipped stale token write"
-            );
-        }
-        Err(e) => {
-            tracing::warn!(
-                provider_id = provider.id,
-                "oauth 401 refresh: token persisted failed (will retry next request): {e}"
-            );
-        }
-    }
-
-    // All providers use the refreshed access_token as credential.
-    Ok(new_token)
-}
-
-// ── Codex ChatGPT backend helpers ──
-
-fn is_codex_chatgpt_backend(
-    cli_key: &str,
-    provider: &crate::providers::ProviderForGateway,
-    provider_base_url: &str,
-) -> bool {
-    if cli_key != "codex" || provider.auth_mode != "oauth" {
-        return false;
-    }
-    let Ok(url) = reqwest::Url::parse(provider_base_url) else {
-        return false;
-    };
-    let path = url.path().trim_end_matches('/');
-    path.ends_with("/backend-api/codex")
-}
-
-fn normalize_codex_chatgpt_forwarded_path(forwarded_path: &str) -> String {
-    if forwarded_path == "/v1" {
-        return "/".to_string();
-    }
-    if let Some(stripped) = forwarded_path.strip_prefix("/v1/") {
-        return format!("/{stripped}");
-    }
-    forwarded_path.to_string()
-}
-
-fn parse_codex_chatgpt_account_id(id_token: Option<&str>) -> Option<String> {
-    let token = id_token.map(str::trim).filter(|value| !value.is_empty())?;
-    let payload_part = token.split('.').nth(1)?;
-    let payload = URL_SAFE_NO_PAD.decode(payload_part).ok().or_else(|| {
-        let mut padded = payload_part.to_string();
-        while padded.len() % 4 != 0 {
-            padded.push('=');
-        }
-        URL_SAFE_NO_PAD.decode(padded).ok()
-    })?;
-    let json: serde_json::Value = serde_json::from_slice(&payload).ok()?;
-    json.get("https://api.openai.com/auth")
-        .and_then(|value| value.get("chatgpt_account_id"))
-        .and_then(serde_json::Value::as_str)
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(str::to_string)
-}
-
-fn maybe_inject_codex_chatgpt_headers(headers: &mut HeaderMap, account_id: Option<&str>) {
-    headers.insert(
-        header::USER_AGENT,
-        HeaderValue::from_static(crate::gateway::oauth::DEFAULT_OAUTH_USER_AGENT),
-    );
-    if !headers.contains_key("originator") {
-        headers.insert(
-            "originator",
-            HeaderValue::from_static(CODEX_ORIGINATOR_HEADER_VALUE),
-        );
-    }
-    if headers.contains_key("chatgpt-account-id") {
-        return;
-    }
-    let Some(value) = account_id.map(str::trim).filter(|value| !value.is_empty()) else {
-        tracing::warn!("codex chatgpt: missing chatgpt-account-id, request may fail with 401");
-        return;
-    };
-    if let Ok(header_value) = HeaderValue::from_str(value) {
-        headers.insert("chatgpt-account-id", header_value);
-    }
-}
-
-fn strip_headers_where(headers: &mut HeaderMap, should_strip: impl Fn(&str) -> bool) {
-    let keys_to_remove: Vec<HeaderName> = headers
-        .keys()
-        .filter(|name| should_strip(name.as_str()))
-        .cloned()
-        .collect();
-
-    for key in keys_to_remove {
-        headers.remove(key);
-    }
-}
-
-fn strip_incompatible_protocol_headers(
-    source_cli_key: &str,
-    target_cli_key: &str,
-    headers: &mut HeaderMap,
+fn push_skipped_provider_attempt(
+    attempts: &mut Vec<FailoverAttempt>,
+    skipped: SkippedProviderAttempt<'_>,
 ) {
-    if source_cli_key == target_cli_key {
-        return;
-    }
-
-    if let ("claude", "codex") = (source_cli_key, target_cli_key) {
-        strip_headers_where(headers, |name| {
-            name.starts_with("anthropic-")
-                || name.starts_with("x-stainless-")
-                || name.starts_with("x-claude-")
-        });
-    }
-}
-
-// Delegate to protocol_bridge::cx2cc module.
-use super::super::protocol_bridge::cx2cc as bridge_cx2cc;
-
-fn codex_chatgpt_request_compat_value(root: &serde_json::Value) -> serde_json::Value {
-    bridge_cx2cc::codex_chatgpt_request_compat_value(root)
-}
-
-fn original_anthropic_stream_requested(introspection_json: Option<&serde_json::Value>) -> bool {
-    bridge_cx2cc::original_anthropic_stream_requested(introspection_json)
-}
-
-fn maybe_apply_codex_chatgpt_request_compat(
-    forwarded_path: &mut String,
-    upstream_body_bytes: &mut Bytes,
-    strip_request_content_encoding: &mut bool,
-) {
-    *forwarded_path = normalize_codex_chatgpt_forwarded_path(forwarded_path);
-    if forwarded_path.as_str() != "/responses" {
-        return;
-    }
-    let Ok(root) = serde_json::from_slice::<serde_json::Value>(upstream_body_bytes.as_ref()) else {
-        return;
-    };
-    let next = codex_chatgpt_request_compat_value(&root);
-    if next == root {
-        return;
-    }
-    if let Ok(encoded) = serde_json::to_vec(&next) {
-        *upstream_body_bytes = Bytes::from(encoded);
-        *strip_request_content_encoding = true;
-    }
-}
-
-fn should_apply_claude_model_mapping(cx2cc_active: bool, forwarded_path: &str) -> bool {
-    if !cx2cc_active {
-        return true;
-    }
-
-    !matches!(
-        forwarded_path.trim_end_matches('/'),
-        "/v1/responses" | "/responses"
-    )
+    attempts.push(FailoverAttempt {
+        provider_id: skipped.provider_id,
+        provider_name: skipped.provider_name.to_string(),
+        base_url: skipped.base_url.to_string(),
+        outcome: "skipped".to_string(),
+        status: None,
+        provider_index: None,
+        retry_index: None,
+        session_reuse: None,
+        error_category: Some(skipped.error_category),
+        error_code: Some(skipped.error_code),
+        decision: Some("skip"),
+        reason: Some(skipped.reason),
+        selection_method: Some(dc::SELECTION_METHOD_FILTERED),
+        reason_code: skipped.reason_code,
+        attempt_started_ms: Some(skipped.attempt_started_ms),
+        attempt_duration_ms: Some(0),
+        circuit_state_before: None,
+        circuit_state_after: None,
+        circuit_failure_count: None,
+        circuit_failure_threshold: None,
+    });
 }
 
 pub(super) async fn run(mut input: RequestContext) -> Response {
@@ -590,30 +234,19 @@ pub(super) async fn run(mut input: RequestContext) -> Response {
             };
 
             // Record skipped provider (circuit breaker gate)
-            attempts.push(FailoverAttempt {
-                provider_id,
-                provider_name: provider_name_base.clone(),
-                base_url: provider_base_url_display.clone(),
-                outcome: "skipped".to_string(),
-                status: None,
-                provider_index: None,
-                retry_index: None,
-                session_reuse: None,
-                error_category: Some("circuit_breaker"),
-                error_code: Some(GatewayErrorCode::ProviderCircuitOpen.as_str()),
-                decision: Some("skip"),
-                reason: Some(format!(
-                    "provider skipped by circuit breaker ({reason_label})"
-                )),
-                selection_method: Some(dc::SELECTION_METHOD_FILTERED),
-                reason_code,
-                attempt_started_ms: Some(started.elapsed().as_millis()),
-                attempt_duration_ms: Some(0),
-                circuit_state_before: None,
-                circuit_state_after: None,
-                circuit_failure_count: None,
-                circuit_failure_threshold: None,
-            });
+            push_skipped_provider_attempt(
+                &mut attempts,
+                SkippedProviderAttempt {
+                    provider_id,
+                    provider_name: &provider_name_base,
+                    base_url: &provider_base_url_display,
+                    error_category: "circuit_breaker",
+                    error_code: GatewayErrorCode::ProviderCircuitOpen.as_str(),
+                    reason: format!("provider skipped by circuit breaker ({reason_label})"),
+                    reason_code,
+                    attempt_started_ms: started.elapsed().as_millis(),
+                },
+            );
             continue;
         };
 
@@ -624,28 +257,19 @@ pub(super) async fn run(mut input: RequestContext) -> Response {
             skipped_limits: &mut skipped_limits,
         }) {
             // Record skipped provider (rate limit gate)
-            attempts.push(FailoverAttempt {
-                provider_id,
-                provider_name: provider_name_base.clone(),
-                base_url: provider_base_url_display.clone(),
-                outcome: "skipped".to_string(),
-                status: None,
-                provider_index: None,
-                retry_index: None,
-                session_reuse: None,
-                error_category: Some("rate_limit"),
-                error_code: Some(GatewayErrorCode::ProviderRateLimited.as_str()),
-                decision: Some("skip"),
-                reason: Some("provider skipped by rate limit".to_string()),
-                selection_method: Some(dc::SELECTION_METHOD_FILTERED),
-                reason_code: Some(dc::REASON_RATE_LIMITED),
-                attempt_started_ms: Some(started.elapsed().as_millis()),
-                attempt_duration_ms: Some(0),
-                circuit_state_before: None,
-                circuit_state_after: None,
-                circuit_failure_count: None,
-                circuit_failure_threshold: None,
-            });
+            push_skipped_provider_attempt(
+                &mut attempts,
+                SkippedProviderAttempt {
+                    provider_id,
+                    provider_name: &provider_name_base,
+                    base_url: &provider_base_url_display,
+                    error_category: "rate_limit",
+                    error_code: GatewayErrorCode::ProviderRateLimited.as_str(),
+                    reason: "provider skipped by rate limit".to_string(),
+                    reason_code: Some(dc::REASON_RATE_LIMITED),
+                    attempt_started_ms: started.elapsed().as_millis(),
+                },
+            );
             continue;
         }
 
@@ -669,30 +293,21 @@ pub(super) async fn run(mut input: RequestContext) -> Response {
                         "provider skipped by credential resolution: {}",
                         err_text
                     );
-                    attempts.push(FailoverAttempt {
-                        provider_id,
-                        provider_name: provider_name_base.clone(),
-                        base_url: provider_base_url_display.clone(),
-                        outcome: "skipped".to_string(),
-                        status: None,
-                        provider_index: None,
-                        retry_index: None,
-                        session_reuse: None,
-                        error_category: Some("auth"),
-                        error_code: Some(GatewayErrorCode::InternalError.as_str()),
-                        decision: Some("skip"),
-                        reason: Some(format!(
-                            "provider skipped by credential resolution: {err_text}"
-                        )),
-                        selection_method: Some(dc::SELECTION_METHOD_FILTERED),
-                        reason_code: None,
-                        attempt_started_ms: Some(started.elapsed().as_millis()),
-                        attempt_duration_ms: Some(0),
-                        circuit_state_before: None,
-                        circuit_state_after: None,
-                        circuit_failure_count: None,
-                        circuit_failure_threshold: None,
-                    });
+                    push_skipped_provider_attempt(
+                        &mut attempts,
+                        SkippedProviderAttempt {
+                            provider_id,
+                            provider_name: &provider_name_base,
+                            base_url: &provider_base_url_display,
+                            error_category: "auth",
+                            error_code: GatewayErrorCode::InternalError.as_str(),
+                            reason: format!(
+                                "provider skipped by credential resolution: {err_text}"
+                            ),
+                            reason_code: None,
+                            attempt_started_ms: started.elapsed().as_millis(),
+                        },
+                    );
                     continue;
                 }
             }
@@ -724,28 +339,19 @@ pub(super) async fn run(mut input: RequestContext) -> Response {
                     "provider skipped by base_url resolution: {}",
                     err
                 );
-                attempts.push(FailoverAttempt {
-                    provider_id,
-                    provider_name: provider_name_base.clone(),
-                    base_url: provider_base_url_display.clone(),
-                    outcome: "skipped".to_string(),
-                    status: None,
-                    provider_index: None,
-                    retry_index: None,
-                    session_reuse: None,
-                    error_category: Some("system"),
-                    error_code: Some(GatewayErrorCode::InternalError.as_str()),
-                    decision: Some("skip"),
-                    reason: Some(format!("provider skipped by base_url resolution: {err}")),
-                    selection_method: Some(dc::SELECTION_METHOD_FILTERED),
-                    reason_code: None,
-                    attempt_started_ms: Some(started.elapsed().as_millis()),
-                    attempt_duration_ms: Some(0),
-                    circuit_state_before: None,
-                    circuit_state_after: None,
-                    circuit_failure_count: None,
-                    circuit_failure_threshold: None,
-                });
+                push_skipped_provider_attempt(
+                    &mut attempts,
+                    SkippedProviderAttempt {
+                        provider_id,
+                        provider_name: &provider_name_base,
+                        base_url: &provider_base_url_display,
+                        error_category: "system",
+                        error_code: GatewayErrorCode::InternalError.as_str(),
+                        reason: format!("provider skipped by base_url resolution: {err}"),
+                        reason_code: None,
+                        attempt_started_ms: started.elapsed().as_millis(),
+                    },
+                );
                 continue;
             }
         };
@@ -802,30 +408,21 @@ pub(super) async fn run(mut input: RequestContext) -> Response {
                         "provider skipped by oauth adapter mismatch: {}",
                         err_text
                     );
-                    attempts.push(FailoverAttempt {
-                        provider_id,
-                        provider_name: provider_name_base.clone(),
-                        base_url: provider_base_url_display.clone(),
-                        outcome: "skipped".to_string(),
-                        status: None,
-                        provider_index: None,
-                        retry_index: None,
-                        session_reuse: None,
-                        error_category: Some("auth"),
-                        error_code: Some(GatewayErrorCode::InternalError.as_str()),
-                        decision: Some("skip"),
-                        reason: Some(format!(
-                            "provider skipped by oauth adapter mismatch: {err_text}"
-                        )),
-                        selection_method: Some(dc::SELECTION_METHOD_FILTERED),
-                        reason_code: None,
-                        attempt_started_ms: Some(started.elapsed().as_millis()),
-                        attempt_duration_ms: Some(0),
-                        circuit_state_before: None,
-                        circuit_state_after: None,
-                        circuit_failure_count: None,
-                        circuit_failure_threshold: None,
-                    });
+                    push_skipped_provider_attempt(
+                        &mut attempts,
+                        SkippedProviderAttempt {
+                            provider_id,
+                            provider_name: &provider_name_base,
+                            base_url: &provider_base_url_display,
+                            error_category: "auth",
+                            error_code: GatewayErrorCode::InternalError.as_str(),
+                            reason: format!(
+                                "provider skipped by oauth adapter mismatch: {err_text}"
+                            ),
+                            reason_code: None,
+                            attempt_started_ms: started.elapsed().as_millis(),
+                        },
+                    );
                     continue;
                 }
             }
@@ -876,30 +473,21 @@ pub(super) async fn run(mut input: RequestContext) -> Response {
                         "provider skipped by gemini oauth request translation: {}",
                         err
                     );
-                    attempts.push(FailoverAttempt {
-                        provider_id,
-                        provider_name: provider_name_base.clone(),
-                        base_url: provider_base_url_display.clone(),
-                        outcome: "skipped".to_string(),
-                        status: None,
-                        provider_index: None,
-                        retry_index: None,
-                        session_reuse: None,
-                        error_category: Some("auth"),
-                        error_code: Some(GatewayErrorCode::InternalError.as_str()),
-                        decision: Some("skip"),
-                        reason: Some(format!(
-                            "provider skipped by gemini oauth request translation: {err}"
-                        )),
-                        selection_method: Some(dc::SELECTION_METHOD_FILTERED),
-                        reason_code: None,
-                        attempt_started_ms: Some(started.elapsed().as_millis()),
-                        attempt_duration_ms: Some(0),
-                        circuit_state_before: None,
-                        circuit_state_after: None,
-                        circuit_failure_count: None,
-                        circuit_failure_threshold: None,
-                    });
+                    push_skipped_provider_attempt(
+                        &mut attempts,
+                        SkippedProviderAttempt {
+                            provider_id,
+                            provider_name: &provider_name_base,
+                            base_url: &provider_base_url_display,
+                            error_category: "auth",
+                            error_code: GatewayErrorCode::InternalError.as_str(),
+                            reason: format!(
+                                "provider skipped by gemini oauth request translation: {err}"
+                            ),
+                            reason_code: None,
+                            attempt_started_ms: started.elapsed().as_millis(),
+                        },
+                    );
                     continue;
                 }
             }
@@ -975,36 +563,24 @@ pub(super) async fn run(mut input: RequestContext) -> Response {
                                                 "CX2CC_BASE_URL_FAILED",
                                                 msg,
                                             );
-                                            attempts.push(FailoverAttempt {
-                                                provider_id,
-                                                provider_name: provider_name_base.clone(),
-                                                base_url: provider_base_url_display.clone(),
-                                                outcome: "skipped".to_string(),
-                                                status: None,
-                                                provider_index: None,
-                                                retry_index: None,
-                                                session_reuse: None,
-                                                error_category: Some("translation"),
-                                                error_code: Some(
-                                                    GatewayErrorCode::InternalError.as_str(),
-                                                ),
-                                                decision: Some("skip"),
-                                                reason: Some(format!(
-                                                    "cx2cc source base_url failed: {err}"
-                                                )),
-                                                selection_method: Some(
-                                                    dc::SELECTION_METHOD_FILTERED,
-                                                ),
-                                                reason_code: None,
-                                                attempt_started_ms: Some(
-                                                    started.elapsed().as_millis(),
-                                                ),
-                                                attempt_duration_ms: Some(0),
-                                                circuit_state_before: None,
-                                                circuit_state_after: None,
-                                                circuit_failure_count: None,
-                                                circuit_failure_threshold: None,
-                                            });
+                                            push_skipped_provider_attempt(
+                                                &mut attempts,
+                                                SkippedProviderAttempt {
+                                                    provider_id,
+                                                    provider_name: &provider_name_base,
+                                                    base_url: &provider_base_url_display,
+                                                    error_category: "translation",
+                                                    error_code: GatewayErrorCode::InternalError
+                                                        .as_str(),
+                                                    reason: format!(
+                                                        "cx2cc source base_url failed: {err}"
+                                                    ),
+                                                    reason_code: None,
+                                                    attempt_started_ms: started
+                                                        .elapsed()
+                                                        .as_millis(),
+                                                },
+                                            );
                                             continue;
                                         }
                                     }
@@ -1116,28 +692,19 @@ pub(super) async fn run(mut input: RequestContext) -> Response {
                                         "CX2CC_TRANSLATE_FAILED",
                                         msg,
                                     );
-                                    attempts.push(FailoverAttempt {
-                                        provider_id,
-                                        provider_name: provider_name_base.clone(),
-                                        base_url: provider_base_url_display.clone(),
-                                        outcome: "skipped".to_string(),
-                                        status: None,
-                                        provider_index: None,
-                                        retry_index: None,
-                                        session_reuse: None,
-                                        error_category: Some("translation"),
-                                        error_code: Some(GatewayErrorCode::InternalError.as_str()),
-                                        decision: Some("skip"),
-                                        reason: Some(format!("cx2cc translation failed: {err}")),
-                                        selection_method: Some(dc::SELECTION_METHOD_FILTERED),
-                                        reason_code: None,
-                                        attempt_started_ms: Some(started.elapsed().as_millis()),
-                                        attempt_duration_ms: Some(0),
-                                        circuit_state_before: None,
-                                        circuit_state_after: None,
-                                        circuit_failure_count: None,
-                                        circuit_failure_threshold: None,
-                                    });
+                                    push_skipped_provider_attempt(
+                                        &mut attempts,
+                                        SkippedProviderAttempt {
+                                            provider_id,
+                                            provider_name: &provider_name_base,
+                                            base_url: &provider_base_url_display,
+                                            error_category: "translation",
+                                            error_code: GatewayErrorCode::InternalError.as_str(),
+                                            reason: format!("cx2cc translation failed: {err}"),
+                                            reason_code: None,
+                                            attempt_started_ms: started.elapsed().as_millis(),
+                                        },
+                                    );
                                     continue;
                                 }
                             }
@@ -1158,30 +725,21 @@ pub(super) async fn run(mut input: RequestContext) -> Response {
                                 "CX2CC_CREDENTIAL_FAILED",
                                 msg,
                             );
-                            attempts.push(FailoverAttempt {
-                                provider_id,
-                                provider_name: provider_name_base.clone(),
-                                base_url: provider_base_url_display.clone(),
-                                outcome: "skipped".to_string(),
-                                status: None,
-                                provider_index: None,
-                                retry_index: None,
-                                session_reuse: None,
-                                error_category: Some("auth"),
-                                error_code: Some(GatewayErrorCode::InternalError.as_str()),
-                                decision: Some("skip"),
-                                reason: Some(format!(
-                                    "cx2cc source provider credential failed: {err}"
-                                )),
-                                selection_method: Some(dc::SELECTION_METHOD_FILTERED),
-                                reason_code: None,
-                                attempt_started_ms: Some(started.elapsed().as_millis()),
-                                attempt_duration_ms: Some(0),
-                                circuit_state_before: None,
-                                circuit_state_after: None,
-                                circuit_failure_count: None,
-                                circuit_failure_threshold: None,
-                            });
+                            push_skipped_provider_attempt(
+                                &mut attempts,
+                                SkippedProviderAttempt {
+                                    provider_id,
+                                    provider_name: &provider_name_base,
+                                    base_url: &provider_base_url_display,
+                                    error_category: "auth",
+                                    error_code: GatewayErrorCode::InternalError.as_str(),
+                                    reason: format!(
+                                        "cx2cc source provider credential failed: {err}"
+                                    ),
+                                    reason_code: None,
+                                    attempt_started_ms: started.elapsed().as_millis(),
+                                },
+                            );
                             continue;
                         }
                     }
@@ -1197,28 +755,19 @@ pub(super) async fn run(mut input: RequestContext) -> Response {
                         "cx2cc: source provider not found: {err}"
                     );
                     emit_gateway_log(&input.state.app, "warn", "CX2CC_SOURCE_NOT_FOUND", msg);
-                    attempts.push(FailoverAttempt {
-                        provider_id,
-                        provider_name: provider_name_base.clone(),
-                        base_url: provider_base_url_display.clone(),
-                        outcome: "skipped".to_string(),
-                        status: None,
-                        provider_index: None,
-                        retry_index: None,
-                        session_reuse: None,
-                        error_category: Some("config"),
-                        error_code: Some(GatewayErrorCode::InternalError.as_str()),
-                        decision: Some("skip"),
-                        reason: Some(format!("cx2cc source provider not found: {err}")),
-                        selection_method: Some(dc::SELECTION_METHOD_FILTERED),
-                        reason_code: None,
-                        attempt_started_ms: Some(started.elapsed().as_millis()),
-                        attempt_duration_ms: Some(0),
-                        circuit_state_before: None,
-                        circuit_state_after: None,
-                        circuit_failure_count: None,
-                        circuit_failure_threshold: None,
-                    });
+                    push_skipped_provider_attempt(
+                        &mut attempts,
+                        SkippedProviderAttempt {
+                            provider_id,
+                            provider_name: &provider_name_base,
+                            base_url: &provider_base_url_display,
+                            error_category: "config",
+                            error_code: GatewayErrorCode::InternalError.as_str(),
+                            reason: format!("cx2cc source provider not found: {err}"),
+                            reason_code: None,
+                            attempt_started_ms: started.elapsed().as_millis(),
+                        },
+                    );
                     continue;
                 }
             }
@@ -1782,146 +1331,4 @@ pub(super) async fn run(mut input: RequestContext) -> Response {
         verbose_provider_error: input.verbose_provider_error,
     })
     .await
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{
-        codex_chatgpt_request_compat_value, maybe_apply_codex_chatgpt_request_compat,
-        maybe_inject_codex_chatgpt_headers, should_apply_claude_model_mapping,
-        strip_incompatible_protocol_headers,
-    };
-    use axum::body::Bytes;
-    use axum::http::{header, HeaderMap, HeaderValue};
-    use serde_json::json;
-
-    #[test]
-    fn skips_claude_model_mapping_for_cx2cc_responses_requests() {
-        assert!(!should_apply_claude_model_mapping(true, "/v1/responses"));
-        assert!(!should_apply_claude_model_mapping(true, "/responses"));
-    }
-
-    #[test]
-    fn keeps_claude_model_mapping_for_non_cx2cc_requests() {
-        assert!(should_apply_claude_model_mapping(false, "/v1/messages"));
-        assert!(should_apply_claude_model_mapping(true, "/v1/messages"));
-    }
-
-    #[test]
-    fn codex_chatgpt_request_compat_filters_unsupported_responses_fields() {
-        let root = json!({
-            "model": "gpt-5",
-            "instructions": "system prompt",
-            "input": [{"role": "user", "content": [{"type": "input_text", "text": "hi"}]}],
-            "stream": true,
-            "max_output_tokens": 1024,
-            "temperature": 0.2,
-            "top_p": 0.9,
-            "store": true,
-        });
-
-        let next = codex_chatgpt_request_compat_value(&root);
-
-        assert_eq!(next["model"], "gpt-5");
-        assert_eq!(next["instructions"], "system prompt");
-        assert_eq!(next["stream"], true);
-        assert_eq!(next["store"], false);
-        assert!(next.get("max_output_tokens").is_none());
-        assert!(next.get("temperature").is_none());
-        assert!(next.get("top_p").is_none());
-    }
-
-    #[test]
-    fn codex_chatgpt_request_compat_rewrites_path_and_body_for_responses() {
-        let mut forwarded_path = "/v1/responses".to_string();
-        let mut upstream_body_bytes = Bytes::from(
-            serde_json::to_vec(&json!({
-                "model": "gpt-5",
-                "instructions": "system prompt",
-                "input": [],
-                "stream": false,
-                "max_output_tokens": 2048,
-                "temperature": 0.3,
-                "store": true,
-            }))
-            .unwrap(),
-        );
-        let mut strip_request_content_encoding = false;
-
-        maybe_apply_codex_chatgpt_request_compat(
-            &mut forwarded_path,
-            &mut upstream_body_bytes,
-            &mut strip_request_content_encoding,
-        );
-
-        let next: serde_json::Value = serde_json::from_slice(&upstream_body_bytes).unwrap();
-        assert_eq!(forwarded_path, "/responses");
-        assert_eq!(next["stream"], true);
-        assert_eq!(next["store"], false);
-        assert!(next.get("max_output_tokens").is_none());
-        assert!(next.get("temperature").is_none());
-        assert!(strip_request_content_encoding);
-    }
-
-    #[test]
-    fn strip_incompatible_protocol_headers_removes_claude_specific_headers_for_codex() {
-        let mut headers = HeaderMap::new();
-        headers.insert("anthropic-version", HeaderValue::from_static("2023-06-01"));
-        headers.insert(
-            "anthropic-beta",
-            HeaderValue::from_static("claude-code-20250219"),
-        );
-        headers.insert(
-            "x-stainless-helper-method",
-            HeaderValue::from_static("stream"),
-        );
-        headers.insert("x-claude-trace", HeaderValue::from_static("trace-1"));
-        headers.insert(
-            header::ACCEPT,
-            HeaderValue::from_static("text/event-stream"),
-        );
-
-        strip_incompatible_protocol_headers("claude", "codex", &mut headers);
-
-        assert!(!headers.contains_key("anthropic-version"));
-        assert!(!headers.contains_key("anthropic-beta"));
-        assert!(!headers.contains_key("x-stainless-helper-method"));
-        assert!(!headers.contains_key("x-claude-trace"));
-        assert_eq!(
-            headers
-                .get(header::ACCEPT)
-                .and_then(|value| value.to_str().ok()),
-            Some("text/event-stream")
-        );
-    }
-
-    #[test]
-    fn codex_chatgpt_identity_headers_override_user_agent_and_originator() {
-        let mut headers = HeaderMap::new();
-        headers.insert(
-            header::USER_AGENT,
-            HeaderValue::from_static("Claude-Code/1.0"),
-        );
-
-        maybe_inject_codex_chatgpt_headers(&mut headers, Some("acct_123"));
-
-        assert_eq!(
-            headers
-                .get(header::USER_AGENT)
-                .and_then(|value| value.to_str().ok()),
-            Some(crate::gateway::oauth::DEFAULT_OAUTH_USER_AGENT)
-        );
-        assert_eq!(
-            headers
-                .get("originator")
-                .and_then(|value| value.to_str().ok()),
-            Some("codex_cli_rs")
-        );
-        assert_eq!(
-            headers
-                .get("chatgpt-account-id")
-                .and_then(|value| value.to_str().ok()),
-            Some("acct_123")
-        );
-    }
 }

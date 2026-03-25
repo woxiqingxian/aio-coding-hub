@@ -148,6 +148,54 @@ afterEach(() => {
 });
 
 describe("pages/providers/ProvidersView", () => {
+  it("treats cooldown-only circuits as unavailable for reset-all visibility", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(1_700_000_000_000);
+
+    vi.mocked(useProvidersListQuery).mockReturnValue({
+      data: [
+        {
+          id: 1,
+          cli_key: "claude",
+          name: "P1",
+          enabled: true,
+          base_urls: ["https://a"],
+          base_url_mode: "order",
+          cost_multiplier: 1,
+          claude_models: {},
+        },
+      ],
+      isFetching: false,
+      error: null,
+    } as any);
+
+    vi.mocked(useGatewayCircuitStatusQuery).mockReturnValue({
+      data: [
+        {
+          provider_id: 1,
+          state: "CLOSED",
+          open_until: null,
+          cooldown_until: Math.floor(Date.now() / 1000) + 30,
+        },
+      ],
+      isFetching: false,
+      error: null,
+      refetch: vi.fn().mockResolvedValue({ data: [] }),
+    } as any);
+    vi.mocked(useProviderSetEnabledMutation).mockReturnValue({ mutateAsync: vi.fn() } as any);
+    vi.mocked(useProviderDeleteMutation).mockReturnValue({ mutateAsync: vi.fn() } as any);
+    vi.mocked(useProvidersReorderMutation).mockReturnValue({ mutateAsync: vi.fn() } as any);
+    vi.mocked(useGatewayCircuitResetProviderMutation).mockReturnValue({
+      mutateAsync: vi.fn(),
+    } as any);
+    vi.mocked(useGatewayCircuitResetCliMutation).mockReturnValue({ mutateAsync: vi.fn() } as any);
+
+    renderWithQuery(<ProvidersView activeCli="claude" setActiveCli={vi.fn()} />);
+
+    expect(screen.getByRole("button", { name: "解除熔断（全部）" })).toBeInTheDocument();
+    expect(screen.getByText(/^熔断\s*00:30$/)).toBeInTheDocument();
+  });
+
   it("shows cx2cc source provider name on claude cards", () => {
     vi.mocked(useProvidersListQuery).mockImplementation((cliKey: any) => {
       if (cliKey === "codex") {

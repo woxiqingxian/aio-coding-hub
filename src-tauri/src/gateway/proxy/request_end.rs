@@ -56,40 +56,228 @@ struct PreparedRequestEnd<'a> {
     log_args: RequestLogEnqueueArgs,
 }
 
-fn prepare_request_end(args: RequestEndArgs<'_>) -> PreparedRequestEnd<'_> {
-    let query = args.query.map(str::to_string);
-    let status = status_override::effective_status(args.status, args.error_code);
-    let excluded_from_stats = args.excluded_from_stats
-        || super::is_claude_count_tokens_request(args.cli_key, args.path)
-        || status_override::is_client_abort(args.error_code);
-    let (attempts, attempts_json) = if args.attempts.is_empty() {
-        (Vec::new(), "[]".to_string())
-    } else {
-        let attempts = args.attempts.to_vec();
-        let attempts_json = serde_json::to_string(&attempts).unwrap_or_else(|_| "[]".to_string());
-        (attempts, attempts_json)
-    };
+struct RequestEndPayloadParts {
+    trace_id: String,
+    cli_key: String,
+    session_id: Option<String>,
+    method: String,
+    path: String,
+    query: Option<String>,
+    excluded_from_stats: bool,
+    special_settings_json: Option<String>,
+    status: Option<u16>,
+    error_code: Option<&'static str>,
+    duration_ms: u128,
+    ttfb_ms: Option<u128>,
+    attempts: Vec<FailoverAttempt>,
+    attempts_json: Option<String>,
+    requested_model: Option<String>,
+    created_at_ms: i64,
+    created_at: i64,
+    usage_metrics: Option<crate::usage::UsageMetrics>,
+    usage: Option<crate::usage::UsageExtract>,
+}
 
-    let log_args = RequestLogEnqueueArgs {
-        trace_id: args.trace_id.to_string(),
-        cli_key: args.cli_key.to_string(),
-        session_id: args.session_id,
-        method: args.method.to_string(),
-        path: args.path.to_string(),
+fn serialize_attempts(attempts: &[FailoverAttempt]) -> String {
+    if attempts.is_empty() {
+        "[]".to_string()
+    } else {
+        serde_json::to_string(attempts).unwrap_or_else(|_| "[]".to_string())
+    }
+}
+
+fn build_request_end_payload(
+    parts: RequestEndPayloadParts,
+) -> (RequestLogEnqueueArgs, Vec<FailoverAttempt>) {
+    let RequestEndPayloadParts {
+        trace_id,
+        cli_key,
+        session_id,
+        method,
+        path,
         query,
         excluded_from_stats,
-        special_settings_json: args.special_settings_json,
+        special_settings_json,
         status,
-        error_code: args.error_code,
-        duration_ms: args.duration_ms,
-        ttfb_ms: args.log_ttfb_ms,
+        error_code,
+        duration_ms,
+        ttfb_ms,
+        attempts,
         attempts_json,
-        requested_model: args.requested_model,
-        created_at_ms: args.created_at_ms,
-        created_at: args.created_at,
-        usage_metrics: args.log_usage_metrics,
-        usage: args.usage,
+        requested_model,
+        created_at_ms,
+        created_at,
+        usage_metrics,
+        usage,
+    } = parts;
+
+    let attempts_json = attempts_json.unwrap_or_else(|| serialize_attempts(&attempts));
+    let log_args = RequestLogEnqueueArgs {
+        trace_id,
+        cli_key,
+        session_id,
+        method,
+        path,
+        query,
+        excluded_from_stats,
+        special_settings_json,
+        status,
+        error_code,
+        duration_ms,
+        ttfb_ms,
+        attempts_json,
+        requested_model,
+        created_at_ms,
+        created_at,
+        usage_metrics,
+        usage,
     };
+
+    (log_args, attempts)
+}
+
+impl RequestLogEnqueueArgs {
+    #[allow(clippy::too_many_arguments)]
+    pub(in crate::gateway) fn from_proxy_request_end_parts(
+        trace_id: &str,
+        cli_key: &str,
+        session_id: Option<String>,
+        method: &str,
+        path: &str,
+        query: Option<&str>,
+        excluded_from_stats: bool,
+        special_settings_json: Option<String>,
+        status: Option<u16>,
+        error_code: Option<&'static str>,
+        duration_ms: u128,
+        ttfb_ms: Option<u128>,
+        attempts: &[FailoverAttempt],
+        requested_model: Option<String>,
+        created_at_ms: i64,
+        created_at: i64,
+        usage_metrics: Option<crate::usage::UsageMetrics>,
+        usage: Option<crate::usage::UsageExtract>,
+    ) -> (Self, Vec<FailoverAttempt>) {
+        let status = status_override::effective_status(status, error_code);
+        let excluded_from_stats = excluded_from_stats
+            || super::is_claude_count_tokens_request(cli_key, path)
+            || status_override::is_client_abort(error_code);
+
+        build_request_end_payload(RequestEndPayloadParts {
+            trace_id: trace_id.to_string(),
+            cli_key: cli_key.to_string(),
+            session_id,
+            method: method.to_string(),
+            path: path.to_string(),
+            query: query.map(str::to_string),
+            excluded_from_stats,
+            special_settings_json,
+            status,
+            error_code,
+            duration_ms,
+            ttfb_ms,
+            attempts: attempts.to_vec(),
+            attempts_json: None,
+            requested_model,
+            created_at_ms,
+            created_at,
+            usage_metrics,
+            usage,
+        })
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(in crate::gateway) fn from_stream_request_end_parts(
+        trace_id: String,
+        cli_key: String,
+        session_id: Option<String>,
+        method: String,
+        path: String,
+        query: Option<String>,
+        excluded_from_stats: bool,
+        special_settings_json: Option<String>,
+        status: u16,
+        error_code: Option<&'static str>,
+        duration_ms: u128,
+        ttfb_ms: Option<u128>,
+        attempts: Vec<FailoverAttempt>,
+        attempts_json: String,
+        requested_model: Option<String>,
+        created_at_ms: i64,
+        created_at: i64,
+        usage: Option<crate::usage::UsageExtract>,
+    ) -> (Self, Vec<FailoverAttempt>) {
+        build_request_end_payload(RequestEndPayloadParts {
+            trace_id,
+            cli_key,
+            session_id,
+            method,
+            path,
+            query,
+            excluded_from_stats: excluded_from_stats
+                || status_override::is_client_abort(error_code),
+            special_settings_json,
+            status: status_override::effective_status(Some(status), error_code),
+            error_code,
+            duration_ms,
+            ttfb_ms,
+            attempts,
+            attempts_json: Some(attempts_json),
+            requested_model,
+            created_at_ms,
+            created_at,
+            usage_metrics: None,
+            usage,
+        })
+    }
+
+    pub(in crate::gateway) fn emit_gateway_request_event(
+        &self,
+        app: &tauri::AppHandle,
+        error_category: Option<&'static str>,
+        event_ttfb_ms: Option<u128>,
+        attempts: Vec<FailoverAttempt>,
+        usage_metrics: Option<crate::usage::UsageMetrics>,
+    ) {
+        emit_request_event(
+            app,
+            self.trace_id.clone(),
+            self.cli_key.clone(),
+            self.method.clone(),
+            self.path.clone(),
+            self.query.clone(),
+            self.status,
+            error_category,
+            self.error_code,
+            self.duration_ms,
+            event_ttfb_ms,
+            attempts,
+            usage_metrics,
+        );
+    }
+}
+
+fn prepare_request_end(args: RequestEndArgs<'_>) -> PreparedRequestEnd<'_> {
+    let (log_args, attempts) = RequestLogEnqueueArgs::from_proxy_request_end_parts(
+        args.trace_id,
+        args.cli_key,
+        args.session_id,
+        args.method,
+        args.path,
+        args.query,
+        args.excluded_from_stats,
+        args.special_settings_json,
+        args.status,
+        args.error_code,
+        args.duration_ms,
+        args.log_ttfb_ms,
+        args.attempts,
+        args.requested_model,
+        args.created_at_ms,
+        args.created_at,
+        args.log_usage_metrics,
+        args.usage,
+    );
 
     PreparedRequestEnd {
         deps: args.deps,
@@ -123,17 +311,9 @@ pub(super) async fn emit_request_event_and_enqueue_request_log(args: RequestEndA
         log_args,
     } = prepare_request_end(args);
 
-    emit_request_event(
+    log_args.emit_gateway_request_event(
         deps.app,
-        log_args.trace_id.clone(),
-        log_args.cli_key.clone(),
-        log_args.method.clone(),
-        log_args.path.clone(),
-        log_args.query.clone(),
-        log_args.status,
         error_category,
-        log_args.error_code,
-        log_args.duration_ms,
         event_ttfb_ms,
         attempts,
         usage_metrics,
@@ -164,17 +344,9 @@ pub(super) fn emit_request_event_and_spawn_request_log(args: RequestEndArgs<'_>)
         log_args,
     } = prepare_request_end(args);
 
-    emit_request_event(
+    log_args.emit_gateway_request_event(
         deps.app,
-        log_args.trace_id.clone(),
-        log_args.cli_key.clone(),
-        log_args.method.clone(),
-        log_args.path.clone(),
-        log_args.query.clone(),
-        log_args.status,
         error_category,
-        log_args.error_code,
-        log_args.duration_ms,
         event_ttfb_ms,
         attempts,
         usage_metrics,
@@ -186,4 +358,106 @@ pub(super) fn emit_request_event_and_spawn_request_log(args: RequestEndArgs<'_>)
         deps.log_tx.clone(),
         log_args,
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::gateway::proxy::GatewayErrorCode;
+
+    fn sample_attempt() -> FailoverAttempt {
+        FailoverAttempt {
+            provider_id: 7,
+            provider_name: "provider".to_string(),
+            base_url: "https://example.com".to_string(),
+            outcome: "success".to_string(),
+            status: Some(200),
+            provider_index: Some(1),
+            retry_index: Some(1),
+            session_reuse: Some(false),
+            error_category: None,
+            error_code: None,
+            decision: None,
+            reason: None,
+            selection_method: None,
+            reason_code: None,
+            attempt_started_ms: Some(1),
+            attempt_duration_ms: Some(2),
+            circuit_state_before: None,
+            circuit_state_after: None,
+            circuit_failure_count: None,
+            circuit_failure_threshold: None,
+        }
+    }
+
+    #[test]
+    fn proxy_request_end_parts_apply_count_tokens_exclusion_and_serialize_attempts() {
+        let attempts = vec![sample_attempt()];
+        let expected_attempts_json = serde_json::to_string(&attempts).unwrap();
+
+        let (log_args, cloned_attempts) = RequestLogEnqueueArgs::from_proxy_request_end_parts(
+            "trace-1",
+            "claude",
+            Some("session-1".to_string()),
+            "POST",
+            "/v1/messages/count_tokens",
+            Some("a=1"),
+            false,
+            Some("{\"type\":\"x\"}".to_string()),
+            Some(200),
+            None,
+            345,
+            Some(12),
+            &attempts,
+            Some("claude-3-7".to_string()),
+            100,
+            200,
+            Some(crate::usage::UsageMetrics::default()),
+            None,
+        );
+
+        assert!(log_args.excluded_from_stats);
+        assert_eq!(log_args.status, Some(200));
+        assert_eq!(log_args.query.as_deref(), Some("a=1"));
+        assert_eq!(log_args.attempts_json, expected_attempts_json);
+        assert_eq!(cloned_attempts.len(), 1);
+        assert_eq!(cloned_attempts[0].provider_id, 7);
+    }
+
+    #[test]
+    fn stream_request_end_parts_keep_attempts_json_and_apply_abort_override() {
+        let attempts = vec![sample_attempt()];
+
+        let (log_args, cloned_attempts) = RequestLogEnqueueArgs::from_stream_request_end_parts(
+            "trace-2".to_string(),
+            "codex".to_string(),
+            None,
+            "POST".to_string(),
+            "/v1/responses".to_string(),
+            None,
+            false,
+            Some("{\"type\":\"client_abort\"}".to_string()),
+            200,
+            Some(GatewayErrorCode::StreamAborted.as_str()),
+            678,
+            Some(34),
+            attempts,
+            "[{\"cached\":true}]".to_string(),
+            Some("gpt-5".to_string()),
+            300,
+            400,
+            None,
+        );
+
+        assert!(log_args.excluded_from_stats);
+        assert_eq!(log_args.status, Some(499));
+        assert_eq!(log_args.attempts_json, "[{\"cached\":true}]");
+        assert_eq!(
+            log_args.special_settings_json.as_deref(),
+            Some("{\"type\":\"client_abort\"}")
+        );
+        assert!(log_args.usage_metrics.is_none());
+        assert_eq!(cloned_attempts.len(), 1);
+        assert_eq!(cloned_attempts[0].provider_id, 7);
+    }
 }

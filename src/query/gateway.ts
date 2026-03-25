@@ -1,3 +1,4 @@
+import { useMemo } from "react";
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   gatewayCircuitResetCli,
@@ -9,6 +10,83 @@ import {
 } from "../services/gateway";
 import type { CliKey } from "../services/providers";
 import { gatewayKeys } from "./keys";
+
+export type GatewayCircuitDerivedState = {
+  isOpen: boolean;
+  isUnavailable: boolean;
+  unavailableUntil: number | null;
+};
+
+export type GatewayCircuitDerivedRow = GatewayCircuitDerivedState & {
+  row: GatewayProviderCircuitStatus;
+};
+
+export type GatewayCircuitRowsSummary = {
+  byProviderId: Record<number, GatewayProviderCircuitStatus>;
+  unavailableRows: GatewayCircuitDerivedRow[];
+  hasUnavailable: boolean;
+  hasUnavailableWithoutUntil: boolean;
+  earliestUnavailableUntil: number | null;
+};
+
+function normalizeGatewayCircuitUnix(value: number | null | undefined) {
+  return value != null && Number.isFinite(value) ? value : null;
+}
+
+export function getGatewayCircuitDerivedState(
+  row: GatewayProviderCircuitStatus | null | undefined
+): GatewayCircuitDerivedState {
+  const isOpen = row?.state === "OPEN";
+  const cooldownUntil = normalizeGatewayCircuitUnix(row?.cooldown_until);
+  const openUntil = isOpen ? normalizeGatewayCircuitUnix(row?.open_until) : null;
+  const unavailableUntil =
+    openUntil == null
+      ? cooldownUntil
+      : cooldownUntil == null
+        ? openUntil
+        : Math.max(openUntil, cooldownUntil);
+
+  return {
+    isOpen,
+    isUnavailable: isOpen || cooldownUntil != null,
+    unavailableUntil,
+  };
+}
+
+export function summarizeGatewayCircuitRows(
+  rows: readonly GatewayProviderCircuitStatus[] | null | undefined
+): GatewayCircuitRowsSummary {
+  const byProviderId: Record<number, GatewayProviderCircuitStatus> = {};
+  const unavailableRows: GatewayCircuitDerivedRow[] = [];
+  let earliestUnavailableUntil: number | null = null;
+  let hasUnavailableWithoutUntil = false;
+
+  for (const row of rows ?? []) {
+    byProviderId[row.provider_id] = row;
+
+    const derived = getGatewayCircuitDerivedState(row);
+    if (!derived.isUnavailable) continue;
+
+    unavailableRows.push({ row, ...derived });
+
+    if (derived.unavailableUntil == null) {
+      hasUnavailableWithoutUntil = true;
+      continue;
+    }
+
+    if (earliestUnavailableUntil == null || derived.unavailableUntil < earliestUnavailableUntil) {
+      earliestUnavailableUntil = derived.unavailableUntil;
+    }
+  }
+
+  return {
+    byProviderId,
+    unavailableRows,
+    hasUnavailable: unavailableRows.length > 0,
+    hasUnavailableWithoutUntil,
+    earliestUnavailableUntil,
+  };
+}
 
 export function useGatewayStatusQuery(options?: {
   enabled?: boolean;
@@ -35,14 +113,7 @@ export function useGatewayCircuitStatusQuery(cliKey: CliKey) {
 
 export function useGatewayCircuitByProviderId(cliKey: CliKey) {
   const query = useGatewayCircuitStatusQuery(cliKey);
-
-  const byId = (() => {
-    const rows = query.data ?? null;
-    if (!rows) return {};
-    const next: Record<number, GatewayProviderCircuitStatus> = {};
-    for (const row of rows) next[row.provider_id] = row;
-    return next;
-  })();
+  const byId = useMemo(() => summarizeGatewayCircuitRows(query.data).byProviderId, [query.data]);
 
   return { ...query, circuitByProviderId: byId };
 }

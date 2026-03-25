@@ -137,7 +137,8 @@ export async function providerOAuthStartFlow(
 ): Promise<{ success: boolean; provider_type?: string; expires_at?: number } | null> {
   return invokeTauriOrNull<{ success: boolean; provider_type?: string; expires_at?: number }>(
     "provider_oauth_start_flow",
-    { cliKey, providerId }
+    { cliKey, providerId },
+    { timeoutMs: 0 }
   );
 }
 

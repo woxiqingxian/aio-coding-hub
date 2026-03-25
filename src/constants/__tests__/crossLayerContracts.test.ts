@@ -1,11 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { appEventNames } from "../appEvents";
 import { gatewayEventNames } from "../gatewayEvents";
+import { GatewayErrorCodes } from "../gatewayErrorCodes";
 import { HOME_USAGE_PERIOD_VALUES } from "../homeUsagePeriods";
 import bindingsSource from "../../generated/bindings.ts?raw";
 import heartbeatSource from "../../../src-tauri/src/app/heartbeat_watchdog.rs?raw";
 import noticeSource from "../../../src-tauri/src/app/notice.rs?raw";
 import gatewayEventsSource from "../../../src-tauri/src/gateway/events.rs?raw";
+import gatewayErrorCodeSource from "../../../src-tauri/src/gateway/proxy/error_code.rs?raw";
 
 function extractRustStringConst(source: string, constName: string) {
   const match = source.match(new RegExp(`const\\s+${constName}:\\s*&str\\s*=\\s*"([^"]+)"`));
@@ -17,6 +19,16 @@ function extractBindingsUnionLiterals(source: string, typeName: string) {
   const match = source.match(new RegExp(`export type ${typeName} = ([^;]+);`));
   expect(match, `missing generated type ${typeName}`).toBeTruthy();
   return Array.from((match?.[1] ?? "").matchAll(/"([^"]+)"/g), (part) => part[1]);
+}
+
+function extractRustGatewayErrorCodes(source: string) {
+  return Array.from(
+    new Set(
+      Array.from(source.matchAll(/"((?:GW|CLI_PROXY)_[A-Z0-9_]+)"/g), (match) => match[1]).filter(
+        (value) => value !== "GW_UNKNOWN"
+      )
+    )
+  );
 }
 
 describe("cross-layer contracts", () => {
@@ -45,6 +57,12 @@ describe("cross-layer contracts", () => {
     );
     expect(extractRustStringConst(gatewayEventsSource, "GATEWAY_CIRCUIT_EVENT_NAME")).toBe(
       gatewayEventNames.circuit
+    );
+  });
+
+  it("keeps gateway error codes aligned with Rust definitions", () => {
+    expect(extractRustGatewayErrorCodes(gatewayErrorCodeSource)).toEqual(
+      Object.values(GatewayErrorCodes)
     );
   });
 

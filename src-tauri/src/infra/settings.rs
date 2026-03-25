@@ -745,6 +745,55 @@ fn migrate_add_codex_home_mode(settings: &mut AppSettings, schema_version_presen
     changed
 }
 
+type SettingsMigration = fn(&mut AppSettings, bool) -> bool;
+
+const SETTINGS_MIGRATIONS: [SettingsMigration; 18] = [
+    migrate_disable_upstream_timeouts,
+    migrate_add_gateway_rectifiers,
+    migrate_add_circuit_breaker_notice,
+    migrate_add_provider_base_url_ping_cache_ttl,
+    migrate_add_codex_session_id_completion,
+    migrate_add_gateway_network_settings,
+    migrate_add_response_fixer_limits,
+    migrate_add_cli_proxy_startup_recovery,
+    migrate_add_cache_anomaly_monitor,
+    migrate_add_wsl_host_address_mode,
+    migrate_add_task_complete_notify,
+    migrate_add_cch_base_config,
+    migrate_add_start_minimized,
+    migrate_add_show_home_heatmap,
+    migrate_add_home_usage_period,
+    migrate_add_show_home_usage,
+    migrate_add_codex_home_override,
+    migrate_add_codex_home_mode,
+];
+
+fn apply_settings_migrations(settings: &mut AppSettings, schema_version_present: bool) -> bool {
+    let mut changed = false;
+    for migration in SETTINGS_MIGRATIONS {
+        changed |= migration(settings, schema_version_present);
+    }
+    changed
+}
+
+fn repair_settings(
+    settings: &mut AppSettings,
+    schema_version_present: bool,
+    raw_settings_json: &serde_json::Value,
+) -> AppResult<bool> {
+    let mut repaired = apply_settings_migrations(settings, schema_version_present);
+    repaired |= sanitize_failover_settings(settings);
+    repaired |= sanitize_circuit_breaker_settings(settings);
+    repaired |= sanitize_provider_cooldown_seconds(settings);
+    repaired |= sanitize_provider_base_url_ping_cache_ttl_seconds(settings);
+    repaired |= sanitize_upstream_timeouts(settings);
+    repaired |= sanitize_response_fixer_limits(settings);
+    repaired |= sanitize_codex_home_override(settings);
+    let canonical = canonical_settings_json(settings)?;
+    repaired |= raw_settings_json != &canonical;
+    Ok(repaired)
+}
+
 fn settings_path<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> AppResult<PathBuf> {
     Ok(app_paths::app_data_dir(app)?.join("settings.json"))
 }
@@ -846,37 +895,8 @@ pub fn read<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> AppResult<AppSettin
 
             // Best-effort migration: copy legacy settings into the new dotdir (do not delete legacy file).
             let mut settings = settings;
-            let mut repaired = false;
-            repaired |= migrate_disable_upstream_timeouts(&mut settings, schema_version_present);
-            repaired |= migrate_add_gateway_rectifiers(&mut settings, schema_version_present);
-            repaired |= migrate_add_circuit_breaker_notice(&mut settings, schema_version_present);
-            repaired |=
-                migrate_add_provider_base_url_ping_cache_ttl(&mut settings, schema_version_present);
-            repaired |=
-                migrate_add_codex_session_id_completion(&mut settings, schema_version_present);
-            repaired |= migrate_add_gateway_network_settings(&mut settings, schema_version_present);
-            repaired |= migrate_add_response_fixer_limits(&mut settings, schema_version_present);
-            repaired |=
-                migrate_add_cli_proxy_startup_recovery(&mut settings, schema_version_present);
-            repaired |= migrate_add_cache_anomaly_monitor(&mut settings, schema_version_present);
-            repaired |= migrate_add_wsl_host_address_mode(&mut settings, schema_version_present);
-            repaired |= migrate_add_task_complete_notify(&mut settings, schema_version_present);
-            repaired |= migrate_add_cch_base_config(&mut settings, schema_version_present);
-            repaired |= migrate_add_start_minimized(&mut settings, schema_version_present);
-            repaired |= migrate_add_show_home_heatmap(&mut settings, schema_version_present);
-            repaired |= migrate_add_home_usage_period(&mut settings, schema_version_present);
-            repaired |= migrate_add_show_home_usage(&mut settings, schema_version_present);
-            repaired |= migrate_add_codex_home_override(&mut settings, schema_version_present);
-            repaired |= migrate_add_codex_home_mode(&mut settings, schema_version_present);
-            repaired |= sanitize_failover_settings(&mut settings);
-            repaired |= sanitize_circuit_breaker_settings(&mut settings);
-            repaired |= sanitize_provider_cooldown_seconds(&mut settings);
-            repaired |= sanitize_provider_base_url_ping_cache_ttl_seconds(&mut settings);
-            repaired |= sanitize_upstream_timeouts(&mut settings);
-            repaired |= sanitize_response_fixer_limits(&mut settings);
-            repaired |= sanitize_codex_home_override(&mut settings);
-            let canonical = canonical_settings_json(&settings)?;
-            repaired |= raw_settings_json != canonical;
+            let repaired =
+                repair_settings(&mut settings, schema_version_present, &raw_settings_json)?;
             if repaired {
                 // best-effort: persist sanitized defaults
             }
@@ -911,34 +931,7 @@ pub fn read<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> AppResult<AppSettin
         );
     }
 
-    let mut repaired = false;
-    repaired |= migrate_disable_upstream_timeouts(&mut settings, schema_version_present);
-    repaired |= migrate_add_gateway_rectifiers(&mut settings, schema_version_present);
-    repaired |= migrate_add_circuit_breaker_notice(&mut settings, schema_version_present);
-    repaired |= migrate_add_provider_base_url_ping_cache_ttl(&mut settings, schema_version_present);
-    repaired |= migrate_add_codex_session_id_completion(&mut settings, schema_version_present);
-    repaired |= migrate_add_gateway_network_settings(&mut settings, schema_version_present);
-    repaired |= migrate_add_response_fixer_limits(&mut settings, schema_version_present);
-    repaired |= migrate_add_cli_proxy_startup_recovery(&mut settings, schema_version_present);
-    repaired |= migrate_add_cache_anomaly_monitor(&mut settings, schema_version_present);
-    repaired |= migrate_add_wsl_host_address_mode(&mut settings, schema_version_present);
-    repaired |= migrate_add_task_complete_notify(&mut settings, schema_version_present);
-    repaired |= migrate_add_cch_base_config(&mut settings, schema_version_present);
-    repaired |= migrate_add_start_minimized(&mut settings, schema_version_present);
-    repaired |= migrate_add_show_home_heatmap(&mut settings, schema_version_present);
-    repaired |= migrate_add_home_usage_period(&mut settings, schema_version_present);
-    repaired |= migrate_add_show_home_usage(&mut settings, schema_version_present);
-    repaired |= migrate_add_codex_home_override(&mut settings, schema_version_present);
-    repaired |= migrate_add_codex_home_mode(&mut settings, schema_version_present);
-    repaired |= sanitize_failover_settings(&mut settings);
-    repaired |= sanitize_circuit_breaker_settings(&mut settings);
-    repaired |= sanitize_provider_cooldown_seconds(&mut settings);
-    repaired |= sanitize_provider_base_url_ping_cache_ttl_seconds(&mut settings);
-    repaired |= sanitize_upstream_timeouts(&mut settings);
-    repaired |= sanitize_response_fixer_limits(&mut settings);
-    repaired |= sanitize_codex_home_override(&mut settings);
-    let canonical = canonical_settings_json(&settings)?;
-    repaired |= raw_settings_json != canonical;
+    let repaired = repair_settings(&mut settings, schema_version_present, &raw_settings_json)?;
     if repaired {
         // Best-effort: persist repaired values while keeping read semantics.
         let _ = write(app, &settings);

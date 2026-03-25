@@ -152,10 +152,16 @@ describe("services/providers", () => {
       provider_type: "google",
       expires_at: 1700000000,
     });
-    expect(invokeTauriOrNull).toHaveBeenCalledWith("provider_oauth_start_flow", {
-      cliKey: "claude",
-      providerId: 10,
-    });
+    expect(invokeTauriOrNull).toHaveBeenCalledWith(
+      "provider_oauth_start_flow",
+      {
+        cliKey: "claude",
+        providerId: 10,
+      },
+      {
+        timeoutMs: 0,
+      }
+    );
   });
 
   it("providerOAuthStartFlow returns null when tauri is absent", async () => {

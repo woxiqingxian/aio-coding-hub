@@ -20,6 +20,7 @@ import type { GatewayProviderCircuitStatus } from "../../services/gateway";
 import { providerGetApiKey, type CliKey, type ProviderSummary } from "../../services/providers";
 import { gatewayKeys, providersKeys } from "../../query/keys";
 import {
+  summarizeGatewayCircuitRows,
   useGatewayCircuitResetCliMutation,
   useGatewayCircuitResetProviderMutation,
   useGatewayCircuitStatusQuery,
@@ -84,27 +85,14 @@ export function ProvidersView({ activeCli }: ProvidersViewProps) {
     [circuitQuery.data]
   );
   const circuitLoading = circuitQuery.isFetching;
-  const circuitByProviderId = useMemo(() => {
-    const next: Record<number, GatewayProviderCircuitStatus> = {};
-    for (const row of circuitRows) {
-      next[row.provider_id] = row;
-    }
-    return next;
-  }, [circuitRows]);
+  const circuitSummary = useMemo(() => summarizeGatewayCircuitRows(circuitRows), [circuitRows]);
+  const circuitByProviderId = circuitSummary.byProviderId;
 
   const [circuitResetting, setCircuitResetting] = useState<Record<number, boolean>>({});
   const [circuitResettingAll, setCircuitResettingAll] = useState(false);
   const circuitAutoRefreshTimerRef = useRef<number | null>(null);
 
-  const hasUnavailableCircuit = useMemo(
-    () =>
-      Object.values(circuitByProviderId).some(
-        (row) =>
-          row.state === "OPEN" ||
-          (row.cooldown_until != null && Number.isFinite(row.cooldown_until))
-      ),
-    [circuitByProviderId]
-  );
+  const hasUnavailableCircuit = circuitSummary.hasUnavailable;
 
   const resetCircuitProviderMutation = useGatewayCircuitResetProviderMutation();
   const resetCircuitCliMutation = useGatewayCircuitResetCliMutation();
@@ -206,27 +194,9 @@ export function ProvidersView({ activeCli }: ProvidersViewProps) {
     if (!hasUnavailableCircuit) return;
 
     const nowUnix = Math.floor(Date.now() / 1000);
-    let nextAvailableUntil: number | null = null;
-    for (const row of Object.values(circuitByProviderId)) {
-      const cooldownUntil = row.cooldown_until ?? null;
-      const isUnavailable =
-        row.state === "OPEN" || (cooldownUntil != null && Number.isFinite(cooldownUntil));
-      if (!isUnavailable) continue;
-
-      const openUntil = row.state === "OPEN" ? (row.open_until ?? null) : null;
-      const until =
-        openUntil == null
-          ? cooldownUntil
-          : cooldownUntil == null
-            ? openUntil
-            : Math.max(openUntil, cooldownUntil);
-
-      if (until == null) {
-        nextAvailableUntil = nowUnix;
-        break;
-      }
-      if (nextAvailableUntil == null || until < nextAvailableUntil) nextAvailableUntil = until;
-    }
+    const nextAvailableUntil = circuitSummary.hasUnavailableWithoutUntil
+      ? nowUnix
+      : circuitSummary.earliestUnavailableUntil;
     if (nextAvailableUntil == null) return;
 
     const delayMs = Math.max(200, (nextAvailableUntil - nowUnix) * 1000 + 250);
@@ -241,7 +211,12 @@ export function ProvidersView({ activeCli }: ProvidersViewProps) {
         circuitAutoRefreshTimerRef.current = null;
       }
     };
-  }, [circuitByProviderId, circuitQuery, hasUnavailableCircuit]);
+  }, [
+    circuitQuery,
+    circuitSummary.earliestUnavailableUntil,
+    circuitSummary.hasUnavailableWithoutUntil,
+    hasUnavailableCircuit,
+  ]);
 
   const toggleProviderEnabled = useCallback(
     async (provider: ProviderSummary) => {

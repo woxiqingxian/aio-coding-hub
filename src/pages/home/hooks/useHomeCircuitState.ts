@@ -9,6 +9,7 @@ import { logToConsole } from "../../../services/consoleLog";
 import type { OpenCircuitRow } from "../../../components/ProviderCircuitBadge";
 import { gatewayKeys } from "../../../query/keys";
 import {
+  summarizeGatewayCircuitRows,
   useGatewayCircuitResetProviderMutation,
   useGatewayCircuitStatusQuery,
 } from "../../../query/gateway";
@@ -35,34 +36,41 @@ export function useHomeCircuitState(): HomeCircuitState {
   const claudeProvidersQuery = useProvidersListQuery("claude");
   const codexProvidersQuery = useProvidersListQuery("codex");
   const geminiProvidersQuery = useProvidersListQuery("gemini");
+  const claudeCircuitSummary = useMemo(
+    () => summarizeGatewayCircuitRows(claudeCircuitsQuery.data),
+    [claudeCircuitsQuery.data]
+  );
+  const codexCircuitSummary = useMemo(
+    () => summarizeGatewayCircuitRows(codexCircuitsQuery.data),
+    [codexCircuitsQuery.data]
+  );
+  const geminiCircuitSummary = useMemo(
+    () => summarizeGatewayCircuitRows(geminiCircuitsQuery.data),
+    [geminiCircuitsQuery.data]
+  );
 
   const openCircuits = useMemo<OpenCircuitRow[]>(() => {
     const specs = [
       {
         cliKey: "claude" as const,
-        circuits: claudeCircuitsQuery.data ?? [],
+        unavailableRows: claudeCircuitSummary.unavailableRows,
         providers: claudeProvidersQuery.data ?? [],
       },
       {
         cliKey: "codex" as const,
-        circuits: codexCircuitsQuery.data ?? [],
+        unavailableRows: codexCircuitSummary.unavailableRows,
         providers: codexProvidersQuery.data ?? [],
       },
       {
         cliKey: "gemini" as const,
-        circuits: geminiCircuitsQuery.data ?? [],
+        unavailableRows: geminiCircuitSummary.unavailableRows,
         providers: geminiProvidersQuery.data ?? [],
       },
     ];
 
     const rows: OpenCircuitRow[] = [];
     for (const spec of specs) {
-      const unavailable = spec.circuits.filter(
-        (row) =>
-          row.state === "OPEN" ||
-          (row.cooldown_until != null && Number.isFinite(row.cooldown_until))
-      );
-      if (unavailable.length === 0) continue;
+      if (spec.unavailableRows.length === 0) continue;
 
       const providerNameById: Record<number, string> = {};
       for (const provider of spec.providers) {
@@ -71,31 +79,13 @@ export function useHomeCircuitState(): HomeCircuitState {
         providerNameById[provider.id] = name;
       }
 
-      for (const row of unavailable) {
-        const cooldownUntil = row.cooldown_until ?? null;
-        if (row.state !== "OPEN") {
-          rows.push({
-            cli_key: spec.cliKey,
-            provider_id: row.provider_id,
-            provider_name: providerNameById[row.provider_id] ?? "未知",
-            open_until: cooldownUntil,
-          });
-          continue;
-        }
-
-        const openUntil = row.open_until ?? null;
-        const until =
-          openUntil == null
-            ? cooldownUntil
-            : cooldownUntil == null
-              ? openUntil
-              : Math.max(openUntil, cooldownUntil);
-
+      for (const unavailable of spec.unavailableRows) {
+        const { row, unavailableUntil } = unavailable;
         rows.push({
           cli_key: spec.cliKey,
           provider_id: row.provider_id,
           provider_name: providerNameById[row.provider_id] ?? "未知",
-          open_until: until,
+          open_until: unavailableUntil,
         });
       }
     }
@@ -109,12 +99,31 @@ export function useHomeCircuitState(): HomeCircuitState {
 
     return rows;
   }, [
-    claudeCircuitsQuery.data,
+    claudeCircuitSummary.unavailableRows,
     claudeProvidersQuery.data,
-    codexCircuitsQuery.data,
+    codexCircuitSummary.unavailableRows,
     codexProvidersQuery.data,
-    geminiCircuitsQuery.data,
+    geminiCircuitSummary.unavailableRows,
     geminiProvidersQuery.data,
+  ]);
+
+  const hasUnavailableCircuit =
+    claudeCircuitSummary.hasUnavailable ||
+    codexCircuitSummary.hasUnavailable ||
+    geminiCircuitSummary.hasUnavailable;
+  const earliestUnavailableUntil = useMemo(() => {
+    const untils = [
+      claudeCircuitSummary.earliestUnavailableUntil,
+      codexCircuitSummary.earliestUnavailableUntil,
+      geminiCircuitSummary.earliestUnavailableUntil,
+    ].filter((value): value is number => value != null);
+
+    if (untils.length === 0) return null;
+    return Math.min(...untils);
+  }, [
+    claudeCircuitSummary.earliestUnavailableUntil,
+    codexCircuitSummary.earliestUnavailableUntil,
+    geminiCircuitSummary.earliestUnavailableUntil,
   ]);
 
   const handleResetProvider = useCallback(
@@ -150,18 +159,13 @@ export function useHomeCircuitState(): HomeCircuitState {
       openCircuitsAutoRefreshTimerRef.current = null;
     }
 
-    if (openCircuits.length === 0) return;
+    if (!hasUnavailableCircuit) return;
 
     const nowUnix = Math.floor(Date.now() / 1000);
-    let nextOpenUntil: number | null = null;
-    for (const row of openCircuits) {
-      const until = row.open_until;
-      if (until == null) continue;
-      if (nextOpenUntil == null || until < nextOpenUntil) nextOpenUntil = until;
-    }
-
     const delayMs =
-      nextOpenUntil != null ? Math.max(200, (nextOpenUntil - nowUnix) * 1000 + 250) : 30_000;
+      earliestUnavailableUntil != null
+        ? Math.max(200, (earliestUnavailableUntil - nowUnix) * 1000 + 250)
+        : 30_000;
 
     openCircuitsAutoRefreshTimerRef.current = window.setTimeout(() => {
       openCircuitsAutoRefreshTimerRef.current = null;
@@ -174,7 +178,7 @@ export function useHomeCircuitState(): HomeCircuitState {
         openCircuitsAutoRefreshTimerRef.current = null;
       }
     };
-  }, [openCircuits, queryClient]);
+  }, [earliestUnavailableUntil, hasUnavailableCircuit, queryClient]);
 
   return {
     openCircuits,

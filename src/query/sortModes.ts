@@ -11,9 +11,13 @@ import {
   sortModeActiveSet,
   sortModeCreate,
   sortModeDelete,
+  sortModeProviderSetEnabled,
+  sortModeProvidersList,
+  sortModeProvidersSetOrder,
   sortModeRename,
   sortModesList,
   type SortModeActiveRow,
+  type SortModeProviderRow,
 } from "../services/sortModes";
 import { sortModesKeys } from "./keys";
 
@@ -27,21 +31,56 @@ function invalidateSortModesQueries(
   }
 }
 
-export function useSortModesListQuery() {
-  return useQuery({
-    queryKey: sortModesKeys.list(),
-    queryFn: () => sortModesList(),
-    enabled: true,
-    placeholderData: keepPreviousData,
+export function sortModeProvidersQueryKey(modeId: number, cliKey: CliKey) {
+  return [...sortModesKeys.all, "providers", cliKey, modeId] as const;
+}
+
+function invalidateSortModeProvidersQuery(
+  queryClient: QueryClient,
+  input: { modeId: number; cliKey: CliKey }
+) {
+  void queryClient.invalidateQueries({
+    queryKey: sortModeProvidersQueryKey(input.modeId, input.cliKey),
   });
 }
 
-export function useSortModeActiveListQuery() {
+export function useSortModesListQuery(options: { enabled?: boolean } = {}) {
+  return useQuery({
+    queryKey: sortModesKeys.list(),
+    queryFn: () => sortModesList(),
+    enabled: options.enabled ?? true,
+    placeholderData: keepPreviousData,
+    retry: false,
+  });
+}
+
+export function useSortModeActiveListQuery(options: { enabled?: boolean } = {}) {
   return useQuery({
     queryKey: sortModesKeys.activeList(),
     queryFn: () => sortModeActiveList(),
-    enabled: true,
+    enabled: options.enabled ?? true,
     placeholderData: keepPreviousData,
+    retry: false,
+  });
+}
+
+export function useSortModeProvidersListQuery(
+  input: { modeId: number | null; cliKey: CliKey },
+  options: { enabled?: boolean } = {}
+) {
+  return useQuery({
+    queryKey:
+      input.modeId == null
+        ? [...sortModesKeys.all, "providers", input.cliKey, null]
+        : sortModeProvidersQueryKey(input.modeId, input.cliKey),
+    queryFn: () => {
+      if (input.modeId == null) {
+        return Promise.resolve<SortModeProviderRow[] | null>(null);
+      }
+      return sortModeProvidersList({ mode_id: input.modeId, cli_key: input.cliKey });
+    },
+    enabled: input.modeId != null && (options.enabled ?? true),
+    retry: false,
   });
 }
 
@@ -120,6 +159,45 @@ export function useSortModeDeleteMutation() {
     mutationFn: (input: { modeId: number }) => sortModeDelete({ mode_id: input.modeId }),
     onSettled: () => {
       invalidateSortModesQueries(queryClient, { includeActiveList: true });
+    },
+  });
+}
+
+export function useSortModeProvidersSetOrderMutation() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (input: { modeId: number; cliKey: CliKey; orderedProviderIds: number[] }) =>
+      sortModeProvidersSetOrder({
+        mode_id: input.modeId,
+        cli_key: input.cliKey,
+        ordered_provider_ids: input.orderedProviderIds,
+      }),
+    onSettled: (_data, _error, input) => {
+      invalidateSortModeProvidersQuery(queryClient, {
+        modeId: input.modeId,
+        cliKey: input.cliKey,
+      });
+    },
+  });
+}
+
+export function useSortModeProviderSetEnabledMutation() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (input: { modeId: number; cliKey: CliKey; providerId: number; enabled: boolean }) =>
+      sortModeProviderSetEnabled({
+        mode_id: input.modeId,
+        cli_key: input.cliKey,
+        provider_id: input.providerId,
+        enabled: input.enabled,
+      }),
+    onSettled: (_data, _error, input) => {
+      invalidateSortModeProvidersQuery(queryClient, {
+        modeId: input.modeId,
+        cliKey: input.cliKey,
+      });
     },
   });
 }

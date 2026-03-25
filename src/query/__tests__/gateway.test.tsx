@@ -12,6 +12,8 @@ import { createQueryWrapper, createTestQueryClient } from "../../test/utils/reac
 import { setTauriRuntime } from "../../test/utils/tauriRuntime";
 import { gatewayKeys } from "../keys";
 import {
+  getGatewayCircuitDerivedState,
+  summarizeGatewayCircuitRows,
   useGatewayCircuitByProviderId,
   useGatewayCircuitResetCliMutation,
   useGatewayCircuitResetProviderMutation,
@@ -33,6 +35,74 @@ vi.mock("../../services/gateway", async () => {
 });
 
 describe("query/gateway", () => {
+  it("getGatewayCircuitDerivedState derives unavailable state and max unavailableUntil", () => {
+    expect(
+      getGatewayCircuitDerivedState({
+        provider_id: 9,
+        state: "OPEN",
+        failure_count: 5,
+        failure_threshold: 5,
+        open_until: 120,
+        cooldown_until: 180,
+      })
+    ).toEqual({
+      isOpen: true,
+      isUnavailable: true,
+      unavailableUntil: 180,
+    });
+
+    expect(
+      getGatewayCircuitDerivedState({
+        provider_id: 10,
+        state: "CLOSED",
+        failure_count: 0,
+        failure_threshold: 5,
+        open_until: 500,
+        cooldown_until: 150,
+      })
+    ).toEqual({
+      isOpen: false,
+      isUnavailable: true,
+      unavailableUntil: 150,
+    });
+  });
+
+  it("summarizeGatewayCircuitRows builds provider lookup and refresh summary", () => {
+    const summary = summarizeGatewayCircuitRows([
+      {
+        provider_id: 1,
+        state: "OPEN",
+        failure_count: 5,
+        failure_threshold: 5,
+        open_until: null,
+        cooldown_until: null,
+      },
+      {
+        provider_id: 2,
+        state: "CLOSED",
+        failure_count: 0,
+        failure_threshold: 5,
+        open_until: 999,
+        cooldown_until: 140,
+      },
+      {
+        provider_id: 3,
+        state: "CLOSED",
+        failure_count: 0,
+        failure_threshold: 5,
+        open_until: null,
+        cooldown_until: null,
+      },
+    ]);
+
+    expect(summary.byProviderId[1]?.provider_id).toBe(1);
+    expect(summary.byProviderId[2]?.provider_id).toBe(2);
+    expect(summary.unavailableRows.map(({ row }) => row.provider_id)).toEqual([1, 2]);
+    expect(summary.hasUnavailable).toBe(true);
+    expect(summary.hasUnavailableWithoutUntil).toBe(true);
+    expect(summary.earliestUnavailableUntil).toBe(140);
+  });
+
   it("useGatewayCircuitByProviderId builds a provider_id -> status map", async () => {
     setTauriRuntime();
 

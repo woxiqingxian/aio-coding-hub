@@ -9,6 +9,10 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 
+const WSL_CODEX_PROVIDER_KEY: &str = "aio";
+const WSL_CODEX_PREFERRED_AUTH_METHOD: &str = "apikey";
+const WSL_CODEX_API_KEY: &str = "aio-coding-hub";
+
 #[derive(Debug, Clone, Serialize)]
 pub struct WslDetection {
     pub detected: bool,
@@ -468,6 +472,59 @@ fn write_file_synced(path: &std::path::Path, data: &[u8]) -> AppResult<()> {
     Ok(())
 }
 
+fn restore_wsl_toml_string_key(
+    table: &mut toml::map::Map<String, toml::Value>,
+    backup: &WslCliBackup,
+    key: &str,
+) {
+    match backup.original_values.get(key) {
+        Some(Some(value)) => {
+            table.insert(key.to_string(), toml::Value::String(value.clone()));
+        }
+        Some(None) | None => {
+            table.remove(key);
+        }
+    }
+}
+
+fn restore_codex_config_toml(content: &str, backup: &WslCliBackup) -> AppResult<String> {
+    let mut parsed = if content.trim().is_empty() {
+        toml::Value::Table(Default::default())
+    } else {
+        toml::from_str::<toml::Value>(content)
+            .map_err(|e| format!("failed to parse Codex config.toml: {e}"))?
+    };
+
+    let table = parsed.as_table_mut().ok_or_else(|| {
+        "failed to restore Codex config.toml: root must be a TOML table".to_string()
+    })?;
+
+    for key in ["preferred_auth_method", "model_provider"] {
+        restore_wsl_toml_string_key(table, backup, key);
+    }
+
+    let remove_model_providers = if let Some(model_providers) = table
+        .get_mut("model_providers")
+        .and_then(toml::Value::as_table_mut)
+    {
+        model_providers.remove(WSL_CODEX_PROVIDER_KEY);
+        model_providers.is_empty()
+    } else {
+        false
+    };
+
+    if remove_model_providers {
+        table.remove("model_providers");
+    }
+
+    let mut out = toml::to_string_pretty(&parsed)
+        .map_err(|e| format!("failed to serialize Codex config.toml: {e}"))?;
+    if !out.ends_with('\n') {
+        out.push('\n');
+    }
+    Ok(out)
+}
+
 // ── Restore WSL clients (pure Rust via UNC paths) ──
 
 /// Restore a single CLI's config for a distro using the saved backup.
@@ -513,25 +570,8 @@ fn restore_wsl_cli_backup(
             if toml_path.exists() {
                 let content = std::fs::read_to_string(&toml_path)
                     .map_err(|e| format!("failed to read {}: {e}", toml_path.display()))?;
-                let mut lines: Vec<String> = content.lines().map(|l| l.to_string()).collect();
-
-                for key in ["preferred_auth_method", "model_provider"] {
-                    let prefix = key.to_string();
-                    // Remove existing lines for this key
-                    lines.retain(|l| {
-                        let trimmed = l.trim();
-                        !(trimmed.starts_with(&prefix)
-                            && trimmed[prefix.len()..].trim_start().starts_with('='))
-                    });
-                    // Re-insert if original had a value
-                    if let Some(Some(val)) = backup.original_values.get(key) {
-                        lines.push(format!("{key} = \"{val}\""));
-                    }
-                }
-
-                let out = lines.join("\n");
-                let toml_out = if out.ends_with('\n') { out } else { out + "\n" };
-                write_file_synced(&toml_path, toml_out.as_bytes())?;
+                let restored = restore_codex_config_toml(&content, backup)?;
+                write_file_synced(&toml_path, restored.as_bytes())?;
             }
 
             // auth.json
@@ -1742,8 +1782,8 @@ fi
 fn configure_wsl_codex(distro: &str, proxy_origin: &str) -> crate::shared::error::AppResult<()> {
     let base_url = format!("{proxy_origin}/v1");
     let base_url = bash_single_quote(&base_url);
-    let provider_key = bash_single_quote("aio");
-    let api_key = bash_single_quote("aio-coding-hub");
+    let provider_key = bash_single_quote(WSL_CODEX_PROVIDER_KEY);
+    let api_key = bash_single_quote(WSL_CODEX_API_KEY);
 
     let script = format!(
         r#"
@@ -2418,9 +2458,15 @@ pub fn configure_clients(
                         }
                         "codex" => {
                             let mut m = std::collections::HashMap::new();
-                            m.insert("preferred_auth_method".to_string(), "api-key".to_string());
-                            m.insert("model_provider".to_string(), "openai".to_string());
-                            m.insert("OPENAI_API_KEY".to_string(), "aio-coding-hub".to_string());
+                            m.insert(
+                                "preferred_auth_method".to_string(),
+                                WSL_CODEX_PREFERRED_AUTH_METHOD.to_string(),
+                            );
+                            m.insert(
+                                "model_provider".to_string(),
+                                WSL_CODEX_PROVIDER_KEY.to_string(),
+                            );
+                            m.insert("OPENAI_API_KEY".to_string(), WSL_CODEX_API_KEY.to_string());
                             m
                         }
                         "gemini" => {
@@ -2867,5 +2913,84 @@ OTHER_VAR=keep
             extract_env_value(content, "GEMINI_API_KEY"),
             Some("my-key".to_string())
         );
+    }
+
+    #[test]
+    fn restore_codex_config_toml_restores_root_keys_and_removes_injected_provider_section() {
+        let backup = WslCliBackup {
+            cli_key: "codex".to_string(),
+            injected_keys: std::collections::HashMap::new(),
+            original_values: [
+                (
+                    "preferred_auth_method".to_string(),
+                    Some("device_code".to_string()),
+                ),
+                ("model_provider".to_string(), Some("openai".to_string())),
+            ]
+            .into_iter()
+            .collect(),
+        };
+        let content = r#"
+preferred_auth_method = "apikey"
+model_provider = "aio"
+model = "gpt-5"
+
+[model_providers.aio]
+name = "aio"
+base_url = "http://127.0.0.1:37123/v1"
+wire_api = "responses"
+requires_openai_auth = true
+
+[model_providers.openai]
+name = "openai"
+base_url = "https://api.openai.com/v1"
+"#;
+
+        let restored = restore_codex_config_toml(content, &backup).expect("restore codex config");
+
+        assert_eq!(
+            extract_toml_value(&restored, "preferred_auth_method"),
+            Some("device_code".to_string())
+        );
+        assert_eq!(
+            extract_toml_value(&restored, "model_provider"),
+            Some("openai".to_string())
+        );
+        assert!(!restored.contains("[model_providers.aio]"));
+        assert!(restored.contains("[model_providers.openai]"));
+        assert!(restored.contains("model = \"gpt-5\""));
+    }
+
+    #[test]
+    fn restore_codex_config_toml_removes_injected_root_keys_when_original_values_missing() {
+        let backup = WslCliBackup {
+            cli_key: "codex".to_string(),
+            injected_keys: std::collections::HashMap::new(),
+            original_values: [
+                ("preferred_auth_method".to_string(), None),
+                ("model_provider".to_string(), None),
+            ]
+            .into_iter()
+            .collect(),
+        };
+        let content = r#"
+preferred_auth_method = "apikey"
+model_provider = "aio"
+
+[model_providers.aio]
+name = "aio"
+base_url = "http://127.0.0.1:37123/v1"
+
+[model_providers.custom]
+name = "custom"
+base_url = "https://example.com/v1"
+"#;
+
+        let restored = restore_codex_config_toml(content, &backup).expect("restore codex config");
+
+        assert_eq!(extract_toml_value(&restored, "preferred_auth_method"), None);
+        assert_eq!(extract_toml_value(&restored, "model_provider"), None);
+        assert!(!restored.contains("[model_providers.aio]"));
+        assert!(restored.contains("[model_providers.custom]"));
     }
 }

@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { Copy, FlaskConical, Pencil, RefreshCw, Terminal, Trash2 } from "lucide-react";
@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import { logToConsole } from "../../services/consoleLog";
 import { FREE_TAG } from "../../constants/providers";
 import type { GatewayProviderCircuitStatus } from "../../services/gateway";
+import { getGatewayCircuitDerivedState } from "../../query/gateway";
 import {
   providerOAuthFetchLimits,
   type ClaudeModels,
@@ -158,19 +159,9 @@ export function SortableProviderCard({
   ].filter((v): v is string => Boolean(v));
   const hasLimits = limitChips.length > 0;
 
-  const isOpen = circuit?.state === "OPEN";
-  const cooldownUntil = circuit?.cooldown_until ?? null;
-  const isUnavailable = isOpen || (cooldownUntil != null && Number.isFinite(cooldownUntil));
+  const circuitState = useMemo(() => getGatewayCircuitDerivedState(circuit), [circuit]);
+  const { isUnavailable, unavailableUntil } = circuitState;
   const nowUnix = useNowUnix(isUnavailable);
-
-  const unavailableUntil = isUnavailable
-    ? (() => {
-        const openUntil = isOpen ? (circuit?.open_until ?? null) : null;
-        if (openUntil == null) return cooldownUntil;
-        if (cooldownUntil == null) return openUntil;
-        return Math.max(openUntil, cooldownUntil);
-      })()
-    : null;
   const unavailableRemaining =
     unavailableUntil != null ? Math.max(0, unavailableUntil - nowUnix) : null;
   const unavailableCountdown =

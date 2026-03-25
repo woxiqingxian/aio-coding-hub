@@ -15,6 +15,8 @@ const ENV_DISABLE_TELEMETRY: &str = "DISABLE_TELEMETRY";
 const ENV_MCP_TIMEOUT: &str = "MCP_TIMEOUT";
 const ENV_ANTHROPIC_BASE_URL: &str = "ANTHROPIC_BASE_URL";
 const ENV_ANTHROPIC_AUTH_TOKEN: &str = "ANTHROPIC_AUTH_TOKEN";
+const CLAUDE_LAUNCHER_DIR_NAME: &str = "claude-launchers";
+const CLAUDE_LAUNCHER_ARTIFACT_TTL_SECS: u64 = 60 * 60;
 
 #[derive(serde::Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
@@ -328,6 +330,7 @@ pub(crate) async fn provider_claude_terminal_launch_command(
         let launch = providers::claude_terminal_launch_context(&db, provider_id)?;
         let claude_base_url = build_claude_gateway_base_url(&gateway_base_origin, provider_id);
         create_claude_terminal_launch_command(
+            &app,
             provider_id,
             &claude_base_url,
             &launch.api_key_plaintext,
@@ -365,24 +368,106 @@ fn build_claude_gateway_base_url(gateway_base_origin: &str, provider_id: i64) ->
     )
 }
 
-fn create_claude_terminal_launch_command(
+fn is_claude_launcher_artifact_file_name(name: &str) -> bool {
+    name.starts_with("claude_") || name.starts_with("aio_claude_launcher_")
+}
+
+fn claude_launch_artifact_paths(
+    dir: &Path,
+    provider_id: i64,
+    pid: u32,
+    now: i64,
+) -> (PathBuf, PathBuf) {
+    let config_path = dir.join(format!("claude_{provider_id}_{pid}_{now}.json"));
+    let script_path = if cfg!(target_os = "windows") {
+        dir.join(format!("aio_claude_launcher_{provider_id}_{pid}_{now}.ps1"))
+    } else {
+        dir.join(format!("aio_claude_launcher_{provider_id}_{pid}_{now}.sh"))
+    };
+    (config_path, script_path)
+}
+
+fn claude_launcher_artifacts_dir<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+) -> crate::shared::error::AppResult<PathBuf> {
+    let dir = crate::infra::app_paths::app_data_dir(app)?.join(CLAUDE_LAUNCHER_DIR_NAME);
+    std::fs::create_dir_all(&dir)
+        .map_err(|e| format!("SYSTEM_ERROR: create claude launcher dir failed: {e}"))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700));
+    }
+    Ok(dir)
+}
+
+fn prune_stale_claude_launch_artifacts(dir: &Path, now: std::time::SystemTime) {
+    let ttl = std::time::Duration::from_secs(CLAUDE_LAUNCHER_ARTIFACT_TTL_SECS);
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let Some(name) = path.file_name().and_then(|value| value.to_str()) else {
+            continue;
+        };
+        if !is_claude_launcher_artifact_file_name(name) {
+            continue;
+        }
+        let Ok(metadata) = entry.metadata() else {
+            continue;
+        };
+        if !metadata.is_file() {
+            continue;
+        }
+        let Ok(modified_at) = metadata.modified() else {
+            continue;
+        };
+        let Ok(age) = now.duration_since(modified_at) else {
+            continue;
+        };
+        if age > ttl {
+            let _ = std::fs::remove_file(path);
+        }
+    }
+}
+
+fn write_claude_launcher_file(
+    path: &Path,
+    content: impl AsRef<[u8]>,
+    executable: bool,
+) -> crate::shared::error::AppResult<()> {
+    std::fs::write(path, content)
+        .map_err(|e| format!("SYSTEM_ERROR: write launcher asset failed: {e}"))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = if executable { 0o700 } else { 0o600 };
+        let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode));
+    }
+    Ok(())
+}
+
+fn create_claude_terminal_launch_command<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
     provider_id: i64,
     base_url: &str,
     api_key_plaintext: &str,
 ) -> crate::shared::error::AppResult<String> {
-    let temp_dir = std::env::temp_dir();
     let now = crate::shared::time::now_unix_seconds();
     let pid = std::process::id();
-
-    let config_path = temp_dir.join(format!("claude_{provider_id}_{pid}_{now}.json"));
+    let artifact_dir = claude_launcher_artifacts_dir(app)?;
+    prune_stale_claude_launch_artifacts(&artifact_dir, std::time::SystemTime::now());
+    let (config_path, script_path) =
+        claude_launch_artifact_paths(&artifact_dir, provider_id, pid, now);
 
     let settings_json = build_claude_settings_json(base_url, api_key_plaintext)?;
-    std::fs::write(&config_path, settings_json)
+    write_claude_launcher_file(&config_path, settings_json, false)
         .map_err(|e| format!("SYSTEM_ERROR: write claude settings failed: {e}"))?;
 
-    let (script_path, script_content, launch_command) =
-        build_claude_launch_assets(provider_id, pid, now, &temp_dir, &config_path);
-    if let Err(err) = std::fs::write(&script_path, script_content) {
+    let (script_content, launch_command) = build_claude_launch_assets(&script_path, &config_path);
+    if let Err(err) = write_claude_launcher_file(&script_path, script_content, true) {
         let _ = std::fs::remove_file(&config_path);
         return Err(format!("SYSTEM_ERROR: write launch script failed: {err}").into());
     }
@@ -390,25 +475,15 @@ fn create_claude_terminal_launch_command(
     Ok(launch_command)
 }
 
-fn build_claude_launch_assets(
-    provider_id: i64,
-    pid: u32,
-    now: i64,
-    temp_dir: &Path,
-    config_path: &Path,
-) -> (PathBuf, String, String) {
+fn build_claude_launch_assets(script_path: &Path, config_path: &Path) -> (String, String) {
     if cfg!(target_os = "windows") {
-        let script_path =
-            temp_dir.join(format!("aio_claude_launcher_{provider_id}_{pid}_{now}.ps1"));
         let script_content = build_claude_launcher_powershell_script(config_path, &script_path);
         let launch_command = build_powershell_launch_command(&script_path);
-        (script_path, script_content, launch_command)
+        (script_content, launch_command)
     } else {
-        let script_path =
-            temp_dir.join(format!("aio_claude_launcher_{provider_id}_{pid}_{now}.sh"));
         let script_content = build_claude_launcher_bash_script(config_path, &script_path);
         let launch_command = build_bash_launch_command(&script_path);
-        (script_path, script_content, launch_command)
+        (script_content, launch_command)
     }
 }
 
@@ -1154,6 +1229,28 @@ mod tests {
 
         assert!(command.starts_with("powershell -NoLogo -NoExit -ExecutionPolicy Bypass -File"));
         assert!(command.contains("\"C:\\\\Temp\\\\aio_launcher.ps1\""));
+    }
+
+    #[test]
+    fn claude_launch_artifact_paths_use_requested_directory() {
+        let dir = Path::new("/tmp/aio-launchers");
+        let (config_path, script_path) = claude_launch_artifact_paths(dir, 9, 77, 1234);
+
+        assert_eq!(config_path, dir.join("claude_9_77_1234.json"));
+        if cfg!(target_os = "windows") {
+            assert_eq!(script_path, dir.join("aio_claude_launcher_9_77_1234.ps1"));
+        } else {
+            assert_eq!(script_path, dir.join("aio_claude_launcher_9_77_1234.sh"));
+        }
+    }
+
+    #[test]
+    fn detects_claude_launcher_artifact_file_names() {
+        assert!(is_claude_launcher_artifact_file_name("claude_1_2_3.json"));
+        assert!(is_claude_launcher_artifact_file_name(
+            "aio_claude_launcher_1_2_3.sh"
+        ));
+        assert!(!is_claude_launcher_artifact_file_name("providers.json"));
     }
     #[test]
     fn provider_upsert_input_deserializes_runtime_camel_case_shape() {

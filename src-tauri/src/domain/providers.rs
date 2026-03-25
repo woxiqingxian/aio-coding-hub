@@ -421,55 +421,98 @@ fn base_urls_from_row(base_url_fallback: &str, base_urls_json: &str) -> Vec<Stri
     parsed
 }
 
-fn row_to_summary(row: &rusqlite::Row<'_>) -> Result<ProviderSummary, rusqlite::Error> {
-    let cli_key: String = row.get("cli_key")?;
+#[derive(Debug, Clone)]
+struct DecodedProviderRow {
+    id: i64,
+    name: String,
+    base_urls: Vec<String>,
+    base_url_mode: ProviderBaseUrlMode,
+    claude_models: ClaudeModels,
+    limit_5h_usd: Option<f64>,
+    limit_daily_usd: Option<f64>,
+    daily_reset_mode: DailyResetMode,
+    daily_reset_time: String,
+    limit_weekly_usd: Option<f64>,
+    limit_monthly_usd: Option<f64>,
+    limit_total_usd: Option<f64>,
+    auth_mode: String,
+    oauth_provider_type: Option<String>,
+    source_provider_id: Option<i64>,
+    bridge_type: Option<String>,
+}
+
+fn decode_provider_row(
+    row: &rusqlite::Row<'_>,
+    cli_key: &str,
+) -> Result<DecodedProviderRow, rusqlite::Error> {
     let base_url_fallback: String = row.get("base_url")?;
     let base_urls_json: String = row.get("base_urls_json")?;
-    let claude_models_json: String = row.get("claude_models_json")?;
-    let tags_json: String = row.get("tags_json")?;
     let base_url_mode_raw: String = row.get("base_url_mode")?;
+    let claude_models_json: String = row.get("claude_models_json")?;
     let daily_reset_mode_raw: String = row.get("daily_reset_mode")?;
     let daily_reset_time_raw: String = row.get("daily_reset_time")?;
-    let base_url_mode =
-        ProviderBaseUrlMode::parse(&base_url_mode_raw).unwrap_or(ProviderBaseUrlMode::Order);
-    let daily_reset_mode =
-        DailyResetMode::parse(&daily_reset_mode_raw).unwrap_or(DailyResetMode::Fixed);
-    let daily_reset_time = normalize_reset_time_hms_lossy(&daily_reset_time_raw);
 
-    Ok(ProviderSummary {
+    Ok(DecodedProviderRow {
         id: row.get("id")?,
-        cli_key: cli_key.clone(),
         name: row.get("name")?,
         base_urls: base_urls_from_row(&base_url_fallback, &base_urls_json),
-        base_url_mode,
+        base_url_mode: ProviderBaseUrlMode::parse(&base_url_mode_raw)
+            .unwrap_or(ProviderBaseUrlMode::Order),
         claude_models: if cli_key == "claude" {
             claude_models_from_json(&claude_models_json)
         } else {
             ClaudeModels::default()
         },
-        enabled: row.get::<_, i64>("enabled")? != 0,
-        priority: row.get("priority")?,
-        cost_multiplier: row.get("cost_multiplier")?,
         limit_5h_usd: row.get("limit_5h_usd")?,
         limit_daily_usd: row.get("limit_daily_usd")?,
-        daily_reset_mode,
-        daily_reset_time,
+        daily_reset_mode: DailyResetMode::parse(&daily_reset_mode_raw)
+            .unwrap_or(DailyResetMode::Fixed),
+        daily_reset_time: normalize_reset_time_hms_lossy(&daily_reset_time_raw),
         limit_weekly_usd: row.get("limit_weekly_usd")?,
         limit_monthly_usd: row.get("limit_monthly_usd")?,
         limit_total_usd: row.get("limit_total_usd")?,
-        tags: tags_from_json(&tags_json),
-        note: row.get("note")?,
-        created_at: row.get("created_at")?,
-        updated_at: row.get("updated_at")?,
         auth_mode: row
             .get::<_, Option<String>>("auth_mode")?
             .unwrap_or_else(|| "api_key".to_string()),
         oauth_provider_type: row.get("oauth_provider_type")?,
+        source_provider_id: row.get("source_provider_id")?,
+        bridge_type: row.get("bridge_type").unwrap_or(None),
+    })
+}
+
+fn row_to_summary(row: &rusqlite::Row<'_>) -> Result<ProviderSummary, rusqlite::Error> {
+    let cli_key: String = row.get("cli_key")?;
+    let tags_json: String = row.get("tags_json")?;
+    let decoded = decode_provider_row(row, &cli_key)?;
+
+    Ok(ProviderSummary {
+        id: decoded.id,
+        cli_key,
+        name: decoded.name,
+        base_urls: decoded.base_urls,
+        base_url_mode: decoded.base_url_mode,
+        claude_models: decoded.claude_models,
+        enabled: row.get::<_, i64>("enabled")? != 0,
+        priority: row.get("priority")?,
+        cost_multiplier: row.get("cost_multiplier")?,
+        limit_5h_usd: decoded.limit_5h_usd,
+        limit_daily_usd: decoded.limit_daily_usd,
+        daily_reset_mode: decoded.daily_reset_mode,
+        daily_reset_time: decoded.daily_reset_time,
+        limit_weekly_usd: decoded.limit_weekly_usd,
+        limit_monthly_usd: decoded.limit_monthly_usd,
+        limit_total_usd: decoded.limit_total_usd,
+        tags: tags_from_json(&tags_json),
+        note: row.get("note")?,
+        created_at: row.get("created_at")?,
+        updated_at: row.get("updated_at")?,
+        auth_mode: decoded.auth_mode,
+        oauth_provider_type: decoded.oauth_provider_type,
         oauth_email: row.get("oauth_email")?,
         oauth_expires_at: row.get("oauth_expires_at")?,
         oauth_last_error: row.get("oauth_last_error")?,
-        source_provider_id: row.get("source_provider_id")?,
-        bridge_type: row.get("bridge_type").unwrap_or(None),
+        source_provider_id: decoded.source_provider_id,
+        bridge_type: decoded.bridge_type,
     })
 }
 
@@ -792,41 +835,26 @@ fn map_gateway_provider_row(
     row: &rusqlite::Row<'_>,
     cli_key: &str,
 ) -> Result<ProviderForGateway, rusqlite::Error> {
-    let base_url_fallback: String = row.get("base_url")?;
-    let base_urls_json: String = row.get("base_urls_json")?;
-    let base_url_mode_raw: String = row.get("base_url_mode")?;
-    let claude_models_json: String = row.get("claude_models_json")?;
-    let daily_reset_mode_raw: String = row.get("daily_reset_mode")?;
-    let daily_reset_time_raw: String = row.get("daily_reset_time")?;
-    let base_url_mode =
-        ProviderBaseUrlMode::parse(&base_url_mode_raw).unwrap_or(ProviderBaseUrlMode::Order);
-    let daily_reset_mode =
-        DailyResetMode::parse(&daily_reset_mode_raw).unwrap_or(DailyResetMode::Fixed);
-    let daily_reset_time = normalize_reset_time_hms_lossy(&daily_reset_time_raw);
+    let decoded = decode_provider_row(row, cli_key)?;
+
     Ok(ProviderForGateway {
-        id: row.get("id")?,
-        name: row.get("name")?,
-        base_urls: base_urls_from_row(&base_url_fallback, &base_urls_json),
-        base_url_mode,
+        id: decoded.id,
+        name: decoded.name,
+        base_urls: decoded.base_urls,
+        base_url_mode: decoded.base_url_mode,
         api_key_plaintext: row.get("api_key_plaintext")?,
-        claude_models: if cli_key == "claude" {
-            claude_models_from_json(&claude_models_json)
-        } else {
-            ClaudeModels::default()
-        },
-        limit_5h_usd: row.get("limit_5h_usd")?,
-        limit_daily_usd: row.get("limit_daily_usd")?,
-        daily_reset_mode,
-        daily_reset_time,
-        limit_weekly_usd: row.get("limit_weekly_usd")?,
-        limit_monthly_usd: row.get("limit_monthly_usd")?,
-        limit_total_usd: row.get("limit_total_usd")?,
-        auth_mode: row
-            .get::<_, Option<String>>("auth_mode")?
-            .unwrap_or_else(|| "api_key".to_string()),
-        oauth_provider_type: row.get("oauth_provider_type")?,
-        source_provider_id: row.get("source_provider_id")?,
-        bridge_type: row.get("bridge_type").unwrap_or(None),
+        claude_models: decoded.claude_models,
+        limit_5h_usd: decoded.limit_5h_usd,
+        limit_daily_usd: decoded.limit_daily_usd,
+        daily_reset_mode: decoded.daily_reset_mode,
+        daily_reset_time: decoded.daily_reset_time,
+        limit_weekly_usd: decoded.limit_weekly_usd,
+        limit_monthly_usd: decoded.limit_monthly_usd,
+        limit_total_usd: decoded.limit_total_usd,
+        auth_mode: decoded.auth_mode,
+        oauth_provider_type: decoded.oauth_provider_type,
+        source_provider_id: decoded.source_provider_id,
+        bridge_type: decoded.bridge_type,
     })
 }
 
