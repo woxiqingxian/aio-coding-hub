@@ -495,6 +495,7 @@ export function SkillsView({
               <Button
                 size="sm"
                 variant="secondary"
+                aria-label="刷新通用技能"
                 onClick={() => void installedQuery.refetch()}
                 disabled={loading || deletingInstalled}
               >
@@ -661,6 +662,7 @@ export function SkillsView({
               <Button
                 size="sm"
                 variant="secondary"
+                aria-label="刷新本机技能"
                 onClick={() => void refreshLocalSkills()}
                 disabled={!canOperateLocal || localLoading || deletingLocal}
               >
