@@ -54,6 +54,27 @@ fn upstream_error_decision(
     base_decision
 }
 
+fn reqwest_error_decision(
+    is_count_tokens: bool,
+    is_connect: bool,
+    retry_index: u32,
+    max_attempts_per_provider: u32,
+) -> FailoverDecision {
+    if is_count_tokens {
+        return FailoverDecision::Abort;
+    }
+
+    if is_connect {
+        return FailoverDecision::SwitchProvider;
+    }
+
+    if retry_index < max_attempts_per_provider {
+        FailoverDecision::RetrySameProvider
+    } else {
+        FailoverDecision::SwitchProvider
+    }
+}
+
 async fn read_response_body_with_optional_limit(
     mut resp: reqwest::Response,
     max_bytes: Option<u64>,
@@ -543,38 +564,29 @@ pub(super) async fn handle_reqwest_error(
         is_request = err.is_request(),
         "reqwest upstream error: {err}"
     );
-    if err.is_connect() {
-        let error_code = GatewayErrorCode::UpstreamConnectFailed.as_str();
-        let decision = FailoverDecision::SwitchProvider;
-        let outcome = format!(
-            "request_error: category={} code={} decision={} err={err}",
-            ErrorCategory::SystemError.as_str(),
-            error_code,
-            decision.as_str(),
-        );
-        return record_system_failure_and_decide(RecordSystemFailureArgs {
-            ctx,
-            provider_ctx,
-            attempt_ctx,
-            loop_state,
-            status: None,
-            error_code,
-            decision,
-            outcome,
-            reason: "reqwest connect error".to_string(),
-        })
-        .await;
-    }
+    let is_count_tokens =
+        is_claude_count_tokens_request(ctx.cli_key.as_str(), ctx.forwarded_path.as_str());
+    let is_connect = err.is_connect();
+    let (_, error_code) = classify_reqwest_error(&err);
+    let decision = reqwest_error_decision(
+        is_count_tokens,
+        is_connect,
+        attempt_ctx.retry_index,
+        ctx.max_attempts_per_provider,
+    );
+    let outcome = format!(
+        "request_error: category={} code={} decision={} err={err}",
+        ErrorCategory::SystemError.as_str(),
+        error_code,
+        decision.as_str(),
+    );
+    let reason = if is_connect {
+        "reqwest connect error"
+    } else {
+        "reqwest error"
+    };
 
-    if is_claude_count_tokens_request(ctx.cli_key.as_str(), ctx.forwarded_path.as_str()) {
-        let (_, error_code) = classify_reqwest_error(&err);
-        let decision = FailoverDecision::Abort;
-        let outcome = format!(
-            "request_error: category={} code={} decision={} err={err}",
-            ErrorCategory::SystemError.as_str(),
-            error_code,
-            decision.as_str(),
-        );
+    if is_count_tokens {
         return record_system_failure_and_decide_no_cooldown(RecordSystemFailureArgs {
             ctx,
             provider_ctx,
@@ -584,27 +596,10 @@ pub(super) async fn handle_reqwest_error(
             error_code,
             decision,
             outcome,
-            reason: "reqwest error".to_string(),
+            reason: reason.to_string(),
         })
         .await;
     }
-
-    let max_attempts_per_provider = ctx.max_attempts_per_provider;
-
-    let (_, error_code) = classify_reqwest_error(&err);
-    let retry_index = attempt_ctx.retry_index;
-    let decision = if retry_index < max_attempts_per_provider {
-        FailoverDecision::RetrySameProvider
-    } else {
-        FailoverDecision::SwitchProvider
-    };
-
-    let outcome = format!(
-        "request_error: category={} code={} decision={} err={err}",
-        ErrorCategory::SystemError.as_str(),
-        error_code,
-        decision.as_str(),
-    );
 
     record_system_failure_and_decide(RecordSystemFailureArgs {
         ctx,
@@ -615,14 +610,14 @@ pub(super) async fn handle_reqwest_error(
         error_code,
         decision,
         outcome,
-        reason: "reqwest error".to_string(),
+        reason: reason.to_string(),
     })
     .await
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{upstream_error_decision, FailoverDecision};
+    use super::{reqwest_error_decision, upstream_error_decision, FailoverDecision};
 
     #[test]
     fn upstream_error_decision_aborts_for_count_tokens() {
@@ -650,5 +645,23 @@ mod tests {
 
         let abort_decision = upstream_error_decision(false, FailoverDecision::Abort, 1, 5);
         assert!(matches!(abort_decision, FailoverDecision::Abort));
+    }
+
+    #[test]
+    fn reqwest_error_decision_aborts_count_tokens_even_for_connect_errors() {
+        let decision = reqwest_error_decision(true, true, 1, 5);
+        assert!(matches!(decision, FailoverDecision::Abort));
+    }
+
+    #[test]
+    fn reqwest_error_decision_switches_non_count_tokens_connect_errors() {
+        let decision = reqwest_error_decision(false, true, 1, 5);
+        assert!(matches!(decision, FailoverDecision::SwitchProvider));
+    }
+
+    #[test]
+    fn reqwest_error_decision_retries_non_connect_errors_before_limit() {
+        let decision = reqwest_error_decision(false, false, 1, 5);
+        assert!(matches!(decision, FailoverDecision::RetrySameProvider));
     }
 }

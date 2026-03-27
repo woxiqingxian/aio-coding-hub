@@ -33,6 +33,10 @@ fn is_claude_count_tokens_request(cli_key: &str, forwarded_path: &str) -> bool {
     cli_key == "claude" && forwarded_path == CLAUDE_COUNT_TOKENS_PATH
 }
 
+fn should_observe_request(cli_key: &str, forwarded_path: &str) -> bool {
+    !is_claude_count_tokens_request(cli_key, forwarded_path)
+}
+
 pub(super) struct RequestLogEnqueueArgs {
     pub(super) trace_id: String,
     pub(super) cli_key: String,

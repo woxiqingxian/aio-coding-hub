@@ -302,6 +302,10 @@ pub(super) async fn emit_request_event_and_enqueue_request_log(args: RequestEndA
         );
     }
 
+    if !super::should_observe_request(args.cli_key, args.path) {
+        return;
+    }
+
     let PreparedRequestEnd {
         deps,
         error_category,
@@ -333,6 +337,10 @@ pub(super) fn emit_request_event_and_spawn_request_log(args: RequestEndArgs<'_>)
             duration_ms = %args.duration_ms,
             "gateway request completed with error"
         );
+    }
+
+    if !super::should_observe_request(args.cli_key, args.path) {
+        return;
     }
 
     let PreparedRequestEnd {
@@ -459,5 +467,21 @@ mod tests {
         assert!(log_args.usage_metrics.is_none());
         assert_eq!(cloned_attempts.len(), 1);
         assert_eq!(cloned_attempts[0].provider_id, 7);
+    }
+
+    #[test]
+    fn should_not_observe_claude_count_tokens_request_end() {
+        assert!(!super::super::should_observe_request(
+            "claude",
+            "/v1/messages/count_tokens"
+        ));
+        assert!(super::super::should_observe_request(
+            "claude",
+            "/v1/messages"
+        ));
+        assert!(super::super::should_observe_request(
+            "codex",
+            "/v1/messages/count_tokens"
+        ));
     }
 }

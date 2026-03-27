@@ -9,7 +9,7 @@ use super::request_end::{
 };
 use super::{
     cli_proxy_guard::cli_proxy_enabled_cached, errors::error_response,
-    is_claude_count_tokens_request,
+    is_claude_count_tokens_request, should_observe_request,
 };
 use super::{ErrorCategory, GatewayErrorCode};
 use provider_selection::{
@@ -918,16 +918,18 @@ pub(in crate::gateway) async fn proxy_impl(
         Err(resp) => return *resp,
     };
 
-    emit_request_start_event(
-        &state.app,
-        trace_id.clone(),
-        cli_key.clone(),
-        method_hint.clone(),
-        forwarded_path.clone(),
-        query.clone(),
-        requested_model.clone(),
-        created_at,
-    );
+    if should_observe_request(&cli_key, &forwarded_path) {
+        emit_request_start_event(
+            &state.app,
+            trace_id.clone(),
+            cli_key.clone(),
+            method_hint.clone(),
+            forwarded_path.clone(),
+            query.clone(),
+            requested_model.clone(),
+            created_at,
+        );
+    }
 
     super::forwarder::forward(RequestContext::from_handler_parts(RequestContextParts {
         state,

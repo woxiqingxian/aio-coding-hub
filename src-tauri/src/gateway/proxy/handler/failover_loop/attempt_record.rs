@@ -1,7 +1,7 @@
 //! Usage: Shared helpers to record SystemError attempts and apply failover decisions.
 
-use super::super::super::provider_router;
 use super::super::super::status_override;
+use super::super::super::{is_claude_count_tokens_request, provider_router};
 use super::*;
 use crate::gateway::events::decision_chain as dc;
 
@@ -114,7 +114,10 @@ async fn record_system_failure_and_decide_impl(
     *last_error_category = Some(category.as_str());
     *last_error_code = Some(error_code);
 
-    if matches!(cooldown_policy, CooldownPolicy::Apply) {
+    let should_apply_cooldown = matches!(cooldown_policy, CooldownPolicy::Apply)
+        && !is_claude_count_tokens_request(ctx.cli_key.as_str(), ctx.forwarded_path.as_str());
+
+    if should_apply_cooldown {
         let provider_cooldown_secs = ctx.provider_cooldown_secs;
         if provider_cooldown_secs > 0
             && matches!(

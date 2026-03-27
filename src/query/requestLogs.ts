@@ -8,8 +8,25 @@ import {
 } from "../services/requestLogs";
 import { requestLogsKeys } from "./keys";
 
+const CLAUDE_INTERNAL_COUNT_TOKENS_PATH = "/v1/messages/count_tokens";
+type RequestLogsListQueryResult = RequestLogSummary[] | null;
+type RequestLogsIncrementalPollResult = number | null;
+type RequestLogsIncrementalRefreshResult = {
+  mode: "full" | "incremental";
+  items: RequestLogSummary[] | null;
+};
+
 function isRequestLogsQueryEnabled(enabled: boolean | undefined) {
   return enabled ?? true;
+}
+
+function shouldHideRequestLog(log: Pick<RequestLogSummary, "cli_key" | "path">) {
+  // Claude CLI 首次对话前会发内部 count_tokens 预请求；它失败时不该伪装成真实对话失败。
+  return log.cli_key === "claude" && log.path === CLAUDE_INTERNAL_COUNT_TOKENS_PATH;
+}
+
+function filterVisibleRequestLogs(rows: RequestLogSummary[]) {
+  return rows.filter((row) => !shouldHideRequestLog(row));
 }
 
 function requestLogCreatedAtMs(log: Pick<RequestLogSummary, "created_at" | "created_at_ms">) {
@@ -49,9 +66,12 @@ export function useRequestLogsListAllQuery(
   options?: { enabled?: boolean; refetchIntervalMs?: number | false }
 ) {
   const enabled = isRequestLogsQueryEnabled(options?.enabled);
-  return useQuery({
+  return useQuery<RequestLogsListQueryResult>({
     queryKey: requestLogsKeys.listAll(limit),
-    queryFn: () => requestLogsListAll(limit),
+    queryFn: async () => {
+      const rows = await requestLogsListAll(limit);
+      return rows == null ? null : filterVisibleRequestLogs(rows);
+    },
     enabled,
     placeholderData: keepPreviousData,
     refetchInterval: options?.refetchIntervalMs ?? false,
@@ -65,7 +85,7 @@ export function useRequestLogsIncrementalPollQuery(
   const queryClient = useQueryClient();
   const enabled = isRequestLogsQueryEnabled(options?.enabled);
 
-  return useQuery({
+  return useQuery<RequestLogsIncrementalPollResult>({
     queryKey: requestLogsKeys.pollAfterIdAll(limit),
     queryFn: async () => {
       const prev = queryClient.getQueryData<RequestLogSummary[] | null>(
@@ -86,21 +106,23 @@ export function useRequestLogsIncrementalPollQuery(
         return null;
       }
 
+      const visibleItems = filterVisibleRequestLogs(items);
+
       if (!cursorId) {
         queryClient.setQueryData(
           requestLogsKeys.listAll(limit),
-          items.slice().sort(sortRequestLogsDesc)
+          visibleItems.slice().sort(sortRequestLogsDesc)
         );
-        return items.length;
+        return visibleItems.length;
       }
 
-      if (items.length === 0) return 0;
+      if (visibleItems.length === 0) return 0;
 
       queryClient.setQueryData<RequestLogSummary[]>(requestLogsKeys.listAll(limit), (cur) =>
-        mergeRequestLogs(cur ?? [], items ?? [], limit)
+        mergeRequestLogs(cur ?? [], visibleItems, limit)
       );
 
-      return items.length;
+      return visibleItems.length;
     },
     enabled,
     refetchInterval: options?.refetchIntervalMs ?? false,
@@ -111,17 +133,21 @@ export function useRequestLogsIncrementalPollQuery(
 export function useRequestLogsIncrementalRefreshMutation(limit: number) {
   const queryClient = useQueryClient();
 
-  return useMutation({
+  return useMutation<RequestLogsIncrementalRefreshResult>({
     mutationFn: async () => {
-      const prev = queryClient.getQueryData<RequestLogSummary[]>(requestLogsKeys.listAll(limit));
+      const prev = queryClient.getQueryData<RequestLogSummary[] | null>(
+        requestLogsKeys.listAll(limit)
+      );
       const cursorId = prev?.length ? computeRequestLogsCursorId(prev) : 0;
 
       if (!cursorId) {
-        const items = await requestLogsListAll(limit);
+        const rawItems = await requestLogsListAll(limit);
+        const items = rawItems == null ? null : filterVisibleRequestLogs(rawItems);
         return { mode: "full" as const, items };
       }
 
-      const items = await requestLogsListAfterIdAll(cursorId, limit);
+      const rawItems = await requestLogsListAfterIdAll(cursorId, limit);
+      const items = rawItems == null ? null : filterVisibleRequestLogs(rawItems);
       return { mode: "incremental" as const, items };
     },
     onSuccess: (result) => {

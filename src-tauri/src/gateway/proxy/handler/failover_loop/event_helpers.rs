@@ -2,6 +2,7 @@
 
 use super::context::{AttemptCtx, CommonCtx, ProviderCtx};
 use crate::gateway::events::{emit_attempt_event, GatewayAttemptEvent};
+use crate::gateway::proxy::should_observe_request;
 
 #[derive(Clone, Copy)]
 pub(super) struct AttemptCircuitFields {
@@ -19,6 +20,10 @@ pub(super) async fn emit_attempt_event_and_log(
     status: Option<u16>,
     circuit: AttemptCircuitFields,
 ) {
+    if !should_observe_request(ctx.cli_key.as_str(), ctx.forwarded_path.as_str()) {
+        return;
+    }
+
     let ProviderCtx {
         provider_id,
         provider_name_base,
