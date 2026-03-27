@@ -24,7 +24,7 @@ export function getErrorCodeLabel(errorCode: string) {
 
 export function SessionReuseBadge({ showCustomTooltip }: { showCustomTooltip: boolean }) {
   const className =
-    "inline-flex items-center rounded-md bg-indigo-50/75 px-2 py-0.5 text-[11px] font-medium text-indigo-600 dark:bg-indigo-900/25 dark:text-indigo-200 cursor-help";
+    "inline-flex items-center rounded-md bg-indigo-50/80 px-2 py-0.5 text-[11px] font-semibold text-indigo-600 ring-1 ring-inset ring-indigo-500/10 dark:bg-indigo-500/15 dark:text-indigo-300 dark:ring-indigo-400/20 cursor-help";
   return showCustomTooltip ? (
     <Tooltip content={SESSION_REUSE_TOOLTIP}>
       <span className={className}>会话复用</span>
@@ -38,7 +38,7 @@ export function SessionReuseBadge({ showCustomTooltip }: { showCustomTooltip: bo
 
 export function FreeBadge() {
   return (
-    <span className="inline-flex items-center rounded-md bg-emerald-50/75 px-2 py-0.5 text-[11px] font-medium text-emerald-600 dark:bg-emerald-900/25 dark:text-emerald-200">
+    <span className="inline-flex items-center rounded-md bg-emerald-50/80 px-2 py-0.5 text-[11px] font-semibold text-emerald-600 ring-1 ring-inset ring-emerald-500/10 dark:bg-emerald-500/15 dark:text-emerald-300 dark:ring-emerald-400/20">
       免费
     </span>
   );
@@ -64,7 +64,7 @@ export function computeStatusBadge(input: {
     return {
       text: "进行中",
       semanticText: "请求进行中",
-      tone: "bg-accent/10 text-accent",
+      tone: "bg-accent/10 text-accent ring-1 ring-inset ring-accent/15",
       isError: false,
       isClientAbort: false,
       hasFailover: !!input.hasFailover,
@@ -94,14 +94,14 @@ export function computeStatusBadge(input: {
   }
 
   const tone = isClientAbort
-    ? "bg-amber-50 text-amber-600 border border-amber-200/60 dark:bg-amber-900/30 dark:text-amber-400 dark:border-amber-700/60"
+    ? "bg-amber-50 text-amber-600 ring-1 ring-inset ring-amber-500/15 dark:bg-amber-500/15 dark:text-amber-400 dark:ring-amber-400/25"
     : isSuccessStatus
       ? hasFailover
-        ? "text-emerald-600 bg-emerald-50/50 border border-amber-300/60 dark:text-emerald-400 dark:bg-emerald-900/30 dark:border-amber-600/60"
-        : "text-emerald-600 bg-emerald-50/50 dark:text-emerald-400 dark:bg-emerald-900/30"
+        ? "text-emerald-600 bg-emerald-50/60 ring-1 ring-inset ring-amber-400/30 dark:text-emerald-400 dark:bg-emerald-500/15 dark:ring-amber-500/30"
+        : "text-emerald-600 bg-emerald-50/60 ring-1 ring-inset ring-emerald-500/10 dark:text-emerald-400 dark:bg-emerald-500/15 dark:ring-emerald-400/20"
       : isError
-        ? "text-rose-600 bg-rose-50/50 dark:text-rose-400 dark:bg-rose-900/30"
-        : "text-slate-500 bg-slate-100 dark:text-slate-400 dark:bg-slate-700";
+        ? "text-rose-600 bg-rose-50/60 ring-1 ring-inset ring-rose-500/10 dark:text-rose-400 dark:bg-rose-500/15 dark:ring-rose-400/20"
+        : "text-slate-500 bg-slate-100 ring-1 ring-inset ring-slate-500/10 dark:text-slate-400 dark:bg-slate-700 dark:ring-slate-500/20";
 
   const title = input.errorCode
     ? `${semanticText} · ${getErrorCodeLabel(input.errorCode)} (${input.errorCode})`

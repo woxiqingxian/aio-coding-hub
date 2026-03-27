@@ -125,6 +125,8 @@ impl RequestContext {
             method_hint.clone(),
             forwarded_path.clone(),
             query.clone(),
+            session_id.clone(),
+            requested_model.clone(),
             created_at_ms,
             created_at,
             started,

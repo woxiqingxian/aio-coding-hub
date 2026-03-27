@@ -146,6 +146,49 @@ body {
   }
 }
 
+/* Subtle shimmer for in-progress indicator bar */
+@keyframes indicator-shimmer {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+
+/* Smooth left-indicator entrance */
+@keyframes indicator-grow {
+  from {
+    transform: scaleY(0);
+    opacity: 0;
+  }
+  to {
+    transform: scaleY(1);
+    opacity: 1;
+  }
+}
+
+.indicator-shimmer-active {
+  background: linear-gradient(
+    90deg,
+    rgba(99, 102, 241, 0.85) 0%,
+    rgba(129, 140, 248, 1) 40%,
+    rgba(99, 102, 241, 0.85) 100%
+  );
+  background-size: 200% 100%;
+  animation: indicator-shimmer 2.5s ease-in-out infinite;
+}
+
+.dark .indicator-shimmer-active {
+  background: linear-gradient(
+    90deg,
+    rgba(99, 102, 241, 0.7) 0%,
+    rgba(165, 180, 252, 0.9) 40%,
+    rgba(99, 102, 241, 0.7) 100%
+  );
+  background-size: 200% 100%;
+}
+
 /* Gradient Mesh - Linear style grid with gradient halos */
 .bg-grid-pattern {
   background-color: var(--color-bg-primary);

@@ -900,6 +900,31 @@ pub(super) async fn run(mut input: RequestContext) -> Response {
             // Realtime routing UX: emit an attempt event as soon as a provider is selected (before awaiting upstream).
             //
             // Note: do NOT enqueue attempt_logs for this "started" event (avoid DB noise/IO); completion events still get persisted.
+            let started_attempt = FailoverAttempt {
+                provider_id,
+                provider_name: provider_name_base.clone(),
+                base_url: provider_base_url_base.clone(),
+                outcome: "started".to_string(),
+                status: None,
+                provider_index: Some(provider_index),
+                retry_index: Some(retry_index),
+                session_reuse,
+                error_category: None,
+                error_code: None,
+                decision: None,
+                reason: None,
+                selection_method: dc::selection_method(provider_index, retry_index, session_reuse),
+                reason_code: None,
+                attempt_started_ms: Some(attempt_started_ms),
+                attempt_duration_ms: Some(0),
+                circuit_state_before: Some(circuit_before.state.as_str()),
+                circuit_state_after: None,
+                circuit_failure_count: Some(circuit_before.failure_count),
+                circuit_failure_threshold: Some(circuit_before.failure_threshold),
+            };
+            input
+                .abort_guard
+                .capture_in_flight_attempt(&started_attempt);
             emit_attempt_event(
                 &input.state.app,
                 GatewayAttemptEvent {

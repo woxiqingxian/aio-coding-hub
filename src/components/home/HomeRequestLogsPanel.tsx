@@ -191,17 +191,17 @@ const RequestLogCard = memo(function RequestLogCard({
         className={cn(
           "relative transition-all duration-200 group/item mx-2 my-1.5 rounded-lg border",
           isSelected
-            ? "bg-indigo-50/40 border-indigo-200 shadow-sm dark:bg-indigo-900/20 dark:border-indigo-700"
-            : "bg-white border-slate-100 hover:bg-slate-50/60 hover:border-slate-200 hover:shadow-sm dark:bg-slate-800 dark:border-slate-700 dark:hover:bg-slate-700/60 dark:hover:border-slate-600"
+            ? "bg-indigo-50/50 border-indigo-200/80 shadow-[0_0_0_1px_rgba(99,102,241,0.08),0_2px_8px_rgba(99,102,241,0.1)] dark:bg-indigo-950/30 dark:border-indigo-600/40 dark:shadow-[0_0_0_1px_rgba(99,102,241,0.15),0_2px_8px_rgba(99,102,241,0.12)]"
+            : "bg-white/80 border-slate-200/60 hover:bg-slate-50/80 hover:border-slate-300/60 hover:shadow-[0_2px_8px_rgba(15,23,42,0.06)] dark:bg-slate-800/80 dark:border-slate-700/60 dark:hover:bg-slate-750/80 dark:hover:border-slate-600/60 dark:hover:shadow-[0_2px_8px_rgba(0,0,0,0.2)]"
         )}
       >
         {/* Selection indicator */}
         <div
           className={cn(
-            "absolute left-0 top-2 bottom-2 w-1 rounded-r-full transition-all duration-200",
+            "absolute left-0 top-2 bottom-2 w-[3px] rounded-r-full transition-all duration-200",
             isSelected
-              ? "bg-indigo-500 opacity-100"
-              : "bg-slate-300 opacity-0 group-hover/item:opacity-40"
+              ? "bg-gradient-to-b from-indigo-500 to-indigo-400 opacity-100 shadow-[2px_0_8px_rgba(99,102,241,0.2)]"
+              : "bg-slate-300 opacity-0 group-hover/item:opacity-50 dark:bg-slate-500"
           )}
         />
 
@@ -209,22 +209,22 @@ const RequestLogCard = memo(function RequestLogCard({
           <div className={cn("flex items-center gap-2 min-w-0", compactMode ? "" : "mb-1.5")}>
             <span
               className={cn(
-                "inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] font-medium shrink-0",
+                "inline-flex w-[100px] shrink-0 items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] font-medium",
                 statusBadge.tone
               )}
               title={statusBadge.title}
             >
               {statusBadge.isError ? (
-                <XCircle className="h-3 w-3" />
+                <XCircle className="h-3 w-3 shrink-0" />
               ) : (
-                <CheckCircle2 className="h-3 w-3" />
+                <CheckCircle2 className="h-3 w-3 shrink-0" />
               )}
-              {statusBadge.text}
+              <span className="flex-1 text-center truncate">{statusBadge.text}</span>
             </span>
 
             <span
               className={cn(
-                "inline-flex min-w-0 items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] font-medium",
+                "inline-flex w-[180px] min-w-0 shrink-0 items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] font-medium",
                 cliTone
               )}
               title={`${cliLabel} / ${modelText}`}
@@ -233,9 +233,8 @@ const RequestLogCard = memo(function RequestLogCard({
                 cliKey={log.cli_key}
                 className="h-2.5 w-2.5 shrink-0 rounded-[3px] object-contain"
               />
-              <span className="truncate">
-                {cliLabel} / {modelText}
-              </span>
+              <span className="shrink-0">{cliLabel} /</span>
+              <span className="flex-1 text-center truncate">{modelText}</span>
             </span>
 
             {compactMode && (
@@ -251,14 +250,14 @@ const RequestLogCard = memo(function RequestLogCard({
             {isFree && <FreeBadge />}
 
             {log.error_code && (
-              <span className="shrink-0 rounded-md bg-amber-50/70 px-2 py-0.5 text-[11px] font-medium text-amber-600 dark:bg-amber-900/20 dark:text-amber-300">
+              <span className="shrink-0 rounded-md bg-amber-50/80 px-2 py-0.5 text-[11px] font-semibold text-amber-600 ring-1 ring-inset ring-amber-500/10 dark:bg-amber-500/15 dark:text-amber-300 dark:ring-amber-400/20">
                 {getErrorCodeLabel(log.error_code)}
               </span>
             )}
 
-            <span className="ml-auto flex items-center gap-1.5 text-xs text-slate-400 dark:text-slate-500 shrink-0">
+            <span className="ml-auto flex w-[150px] shrink-0 items-center justify-end gap-1.5 text-xs text-slate-400 dark:text-slate-500 whitespace-nowrap">
               {log.session_reuse && <SessionReuseBadge showCustomTooltip={showCustomTooltip} />}
-              <Clock className="h-3 w-3" />
+              <Clock className="h-3 w-3 shrink-0" />
               {formatUnixSeconds(log.created_at)}
             </span>
           </div>
@@ -267,8 +266,8 @@ const RequestLogCard = memo(function RequestLogCard({
             <div className="flex items-start gap-3 text-[11px]">
               <div className="flex flex-col gap-y-0.5 w-[110px] shrink-0" title={providerTitle}>
                 <div className="flex items-center gap-1 h-4">
-                  <Server className="h-3 w-3 text-slate-400 dark:text-slate-500 shrink-0" />
-                  <span className="truncate font-medium text-slate-600 dark:text-slate-400">
+                  <Server className="h-3 w-3 text-slate-400/80 dark:text-slate-500/80 shrink-0" />
+                  <span className="truncate font-semibold text-slate-600 dark:text-slate-300">
                     {providerText}
                   </span>
                 </div>
@@ -306,31 +305,33 @@ const RequestLogCard = memo(function RequestLogCard({
 
               <div className="grid grid-cols-4 gap-x-3 gap-y-0.5 flex-1 text-slate-500 dark:text-slate-400">
                 <div className="flex items-center gap-1 h-4" title="Input Tokens">
-                  <span className="text-slate-400 dark:text-slate-500 shrink-0">输入</span>
-                  <span className="font-mono tabular-nums text-slate-600 dark:text-slate-300 truncate">
+                  <span className="text-slate-400/80 dark:text-slate-500/80 shrink-0">输入</span>
+                  <span className="font-mono tabular-nums text-slate-700 dark:text-slate-200 truncate">
                     {formatInteger(effectiveInputTokens)}
                   </span>
                 </div>
                 <div className="flex items-center gap-1 h-4" title="Cache Write">
-                  <span className="text-slate-400 dark:text-slate-500 shrink-0">缓存创建</span>
+                  <span className="text-slate-400/80 dark:text-slate-500/80 shrink-0">
+                    缓存创建
+                  </span>
                   {cacheWrite.tokens != null ? (
                     <>
-                      <span className="font-mono tabular-nums text-slate-600 dark:text-slate-300 truncate">
+                      <span className="font-mono tabular-nums text-slate-700 dark:text-slate-200 truncate">
                         {formatInteger(cacheWrite.tokens)}
                       </span>
                       {cacheWrite.ttl && cacheWrite.tokens > 0 && (
-                        <span className="text-slate-400 dark:text-slate-500 text-[10px]">
+                        <span className="text-slate-400/70 dark:text-slate-500/70 text-[10px]">
                           ({cacheWrite.ttl})
                         </span>
                       )}
                     </>
                   ) : (
-                    <span className="text-slate-300 dark:text-slate-600">—</span>
+                    <span className="text-slate-300/60 dark:text-slate-600/60">—</span>
                   )}
                 </div>
                 <div className="flex items-center gap-1 h-4" title="TTFB">
-                  <span className="text-slate-400 dark:text-slate-500 shrink-0">首字</span>
-                  <span className="font-mono tabular-nums text-slate-600 dark:text-slate-300 truncate">
+                  <span className="text-slate-400/80 dark:text-slate-500/80 shrink-0">首字</span>
+                  <span className="font-mono tabular-nums text-slate-700 dark:text-slate-200 truncate">
                     {ttfbMs != null ? formatDurationMs(ttfbMs) : "—"}
                   </span>
                 </div>
@@ -338,31 +339,33 @@ const RequestLogCard = memo(function RequestLogCard({
                   className="flex items-center gap-1 h-4"
                   title={rawCostUsdText === "—" ? undefined : rawCostUsdText}
                 >
-                  <span className="text-slate-400 dark:text-slate-500 shrink-0">花费</span>
-                  <span className="font-mono tabular-nums text-slate-600 dark:text-slate-300 truncate">
+                  <span className="text-slate-400/80 dark:text-slate-500/80 shrink-0">花费</span>
+                  <span className="font-mono tabular-nums text-slate-700 dark:text-slate-200 truncate">
                     {rawCostUsdText}
                   </span>
                 </div>
 
                 <div className="flex items-center gap-1 h-4" title="Output Tokens">
-                  <span className="text-slate-400 dark:text-slate-500 shrink-0">输出</span>
-                  <span className="font-mono tabular-nums text-slate-600 dark:text-slate-300 truncate">
+                  <span className="text-slate-400/80 dark:text-slate-500/80 shrink-0">输出</span>
+                  <span className="font-mono tabular-nums text-slate-700 dark:text-slate-200 truncate">
                     {formatInteger(log.output_tokens)}
                   </span>
                 </div>
                 <div className="flex items-center gap-1 h-4" title="Cache Read">
-                  <span className="text-slate-400 dark:text-slate-500 shrink-0">缓存读取</span>
+                  <span className="text-slate-400/80 dark:text-slate-500/80 shrink-0">
+                    缓存读取
+                  </span>
                   {log.cache_read_input_tokens != null ? (
-                    <span className="font-mono tabular-nums text-slate-600 dark:text-slate-300 truncate">
+                    <span className="font-mono tabular-nums text-slate-700 dark:text-slate-200 truncate">
                       {formatInteger(log.cache_read_input_tokens)}
                     </span>
                   ) : (
-                    <span className="text-slate-300 dark:text-slate-600">—</span>
+                    <span className="text-slate-300/60 dark:text-slate-600/60">—</span>
                   )}
                 </div>
                 <div className="flex items-center gap-1 h-4" title="Duration">
-                  <span className="text-slate-400 dark:text-slate-500 shrink-0">耗时</span>
-                  <span className="font-mono tabular-nums text-slate-600 dark:text-slate-300 truncate">
+                  <span className="text-slate-400/80 dark:text-slate-500/80 shrink-0">耗时</span>
+                  <span className="font-mono tabular-nums text-slate-700 dark:text-slate-200 truncate">
                     {formatDurationMs(log.duration_ms)}
                   </span>
                 </div>
@@ -374,13 +377,13 @@ const RequestLogCard = memo(function RequestLogCard({
                       : undefined
                   }
                 >
-                  <span className="text-slate-400 dark:text-slate-500 shrink-0">速率</span>
+                  <span className="text-slate-400/80 dark:text-slate-500/80 shrink-0">速率</span>
                   {outputTokensPerSecond != null ? (
-                    <span className="font-mono tabular-nums text-slate-600 dark:text-slate-300 truncate">
+                    <span className="font-mono tabular-nums text-slate-700 dark:text-slate-200 truncate">
                       {formatTokensPerSecondShort(outputTokensPerSecond)}
                     </span>
                   ) : (
-                    <span className="text-slate-300 dark:text-slate-600">—</span>
+                    <span className="text-slate-300/60 dark:text-slate-600/60">—</span>
                   )}
                 </div>
               </div>
@@ -616,11 +619,15 @@ const RequestLogsList = memo(function RequestLogsList({
 
   return (
     <div ref={scrollRef} className="scrollbar-overlay flex-1 overflow-auto pr-1 py-2">
-      <RealtimeTraceCards
-        traces={realtimeTraceCandidates}
-        formatUnixSeconds={formatUnixSeconds}
-        showCustomTooltip={showCustomTooltip}
-      />
+      {/* Wrapper isolates trace exit animations from the log list below,
+          preventing layout shifts when multiple traces collapse simultaneously. */}
+      <div className="will-change-[height]">
+        <RealtimeTraceCards
+          traces={realtimeTraceCandidates}
+          formatUnixSeconds={formatUnixSeconds}
+          showCustomTooltip={showCustomTooltip}
+        />
+      </div>
 
       {requestLogsAvailable === false ? (
         <div className="p-4 text-sm text-slate-600 dark:text-slate-400">数据不可用</div>

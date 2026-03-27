@@ -605,6 +605,25 @@ mod tests {
     }
 
     #[test]
+    fn started_attempt_still_resolves_provider_for_abort_logs() {
+        let attempts = parse_attempts(
+            r#"[
+                {"provider_id":12,"provider_name":"Claude Bridge","outcome":"started","status":null,"error_code":null,"decision":null,"reason":null}
+            ]"#,
+        );
+
+        let (final_id, final_name) = final_provider_from_attempts(&attempts);
+        assert_eq!(final_id, 12);
+        assert_eq!(final_name, "Claude Bridge");
+
+        let route = route_from_attempts(&attempts);
+        assert_eq!(route.len(), 1);
+        assert_eq!(route[0].provider_id, 12);
+        assert_eq!(route[0].provider_name, "Claude Bridge");
+        assert!(!route[0].ok);
+    }
+
+    #[test]
     fn loads_source_provider_names_for_bridge_providers() {
         let conn = Connection::open_in_memory().unwrap();
         conn.execute_batch(

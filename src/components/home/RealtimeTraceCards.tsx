@@ -33,8 +33,8 @@ export type RealtimeTraceCardsProps = {
   showCustomTooltip: boolean;
 };
 
-const REALTIME_TRACE_EXIT_START_MS = 1200;
-const REALTIME_TRACE_EXIT_ANIM_MS = 500;
+const REALTIME_TRACE_EXIT_START_MS = 600;
+const REALTIME_TRACE_EXIT_ANIM_MS = 400;
 const REALTIME_TRACE_EXIT_TOTAL_MS =
   REALTIME_TRACE_EXIT_START_MS + REALTIME_TRACE_EXIT_ANIM_MS + 100;
 
@@ -43,6 +43,12 @@ const REALTIME_TRACE_EXIT_TOTAL_MS =
  * Works independently of traceStore pruning for defense-in-depth.
  */
 const STALE_TRACE_TIMEOUT_MS = 5 * 60 * 1000;
+
+/**
+ * When multiple traces complete within this window, they batch-exit together
+ * to avoid staggered collapse animations that feel chaotic.
+ */
+const BATCH_EXIT_WINDOW_MS = 500;
 
 export const RealtimeTraceCards = memo(function RealtimeTraceCards({
   traces,
@@ -95,11 +101,30 @@ export const RealtimeTraceCards = memo(function RealtimeTraceCards({
     return kept.slice(0, 5);
   }, [traces, nowMs]);
 
+  // Compute a batch-aligned exit threshold: if multiple traces completed within
+  // BATCH_EXIT_WINDOW_MS of each other, they all exit when the earliest one would.
+  const batchExitThresholdMs = useMemo(() => {
+    const completedTraces = visibleTraces.filter((t) => t.summary);
+    if (completedTraces.length <= 1) return null;
+    // Find earliest completion
+    const earliestLastSeen = Math.min(...completedTraces.map((t) => t.last_seen_ms));
+    const latestLastSeen = Math.max(...completedTraces.map((t) => t.last_seen_ms));
+    // If completions are within the batch window, align exits to the earliest
+    if (latestLastSeen - earliestLastSeen <= BATCH_EXIT_WINDOW_MS) {
+      return earliestLastSeen + REALTIME_TRACE_EXIT_START_MS;
+    }
+    return null;
+  }, [visibleTraces]);
+
   return (
     <>
       {visibleTraces.map((trace) => {
         const completedAgeMs = trace.summary ? Math.max(0, nowMs - trace.last_seen_ms) : 0;
-        const isExiting = Boolean(trace.summary) && completedAgeMs >= REALTIME_TRACE_EXIT_START_MS;
+        const isExiting =
+          Boolean(trace.summary) &&
+          (batchExitThresholdMs != null
+            ? nowMs >= batchExitThresholdMs
+            : completedAgeMs >= REALTIME_TRACE_EXIT_START_MS);
         const runningMs = trace.summary
           ? trace.summary.duration_ms
           : Math.max(0, nowMs - trace.first_seen_ms);
@@ -273,28 +298,28 @@ export const RealtimeTraceCards = memo(function RealtimeTraceCards({
             className={cn(
               "transform overflow-hidden transition-all ease-out motion-reduce:transition-none motion-reduce:transform-none",
               isExiting
-                ? "max-h-0 opacity-0 translate-y-1 !mt-0 duration-500"
-                : "max-h-[120px] opacity-100 translate-y-0 duration-500 my-1.5 mx-2"
+                ? "max-h-0 opacity-0 scale-y-95 !mt-0 !mb-0 duration-400 ease-in"
+                : "max-h-[120px] opacity-100 scale-y-100 duration-300 ease-out my-1.5 mx-2"
             )}
           >
             <div
               className={cn(
-                "group/item relative rounded-lg border shadow-sm transition-colors duration-300 ease-out",
+                "group/item relative rounded-lg border transition-colors duration-300 ease-out",
                 isInProgress
-                  ? "bg-white border-indigo-200/80 dark:bg-slate-800 dark:border-indigo-700/60"
-                  : "bg-white border-slate-100 dark:bg-slate-800 dark:border-slate-700"
+                  ? "bg-white/90 border-indigo-200/80 shadow-[0_0_0_1px_rgba(99,102,241,0.06),0_2px_12px_rgba(99,102,241,0.1)] glow-pulse-active dark:bg-slate-800/90 dark:border-indigo-600/50 dark:shadow-[0_0_0_1px_rgba(99,102,241,0.12),0_2px_12px_rgba(99,102,241,0.15)]"
+                  : "bg-white/80 border-slate-200/60 shadow-sm dark:bg-slate-800/80 dark:border-slate-700/60"
               )}
             >
               <div
                 className={cn(
-                  "absolute left-0 top-2 bottom-2 w-1 rounded-r-full transition-colors duration-500",
+                  "absolute left-0 top-2 bottom-2 w-[3px] rounded-r-full transition-all duration-500 origin-center",
                   isInProgress
-                    ? "bg-indigo-500"
+                    ? "indicator-shimmer-active shadow-[2px_0_8px_rgba(99,102,241,0.25)]"
                     : statusBadge.isError
-                      ? "bg-rose-400 opacity-70"
+                      ? "bg-rose-400 opacity-80"
                       : hasFailover
-                        ? "bg-amber-400 opacity-70"
-                        : "bg-slate-300 opacity-40"
+                        ? "bg-amber-400 opacity-80"
+                        : "bg-slate-300/60 opacity-50 dark:bg-slate-500/60"
                 )}
               />
 
@@ -302,24 +327,24 @@ export const RealtimeTraceCards = memo(function RealtimeTraceCards({
                 <div className="mb-1.5 flex min-w-0 items-center gap-2">
                   <span
                     className={cn(
-                      "inline-flex shrink-0 items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] font-medium",
+                      "inline-flex w-[100px] shrink-0 items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] font-medium",
                       statusBadge.tone
                     )}
                     title={statusBadge.title}
                   >
                     {isInProgress ? (
-                      <Loader2 className="h-3 w-3 animate-spin" />
+                      <Loader2 className="h-3 w-3 shrink-0 animate-spin" />
                     ) : statusBadge.isError ? (
-                      <XCircle className="h-3 w-3" />
+                      <XCircle className="h-3 w-3 shrink-0" />
                     ) : (
-                      <CheckCircle2 className="h-3 w-3" />
+                      <CheckCircle2 className="h-3 w-3 shrink-0" />
                     )}
-                    {statusBadge.text}
+                    <span className="flex-1 text-center truncate">{statusBadge.text}</span>
                   </span>
 
                   <span
                     className={cn(
-                      "inline-flex min-w-0 items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] font-medium",
+                      "inline-flex w-[180px] min-w-0 shrink-0 items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] font-medium",
                       cliTone
                     )}
                     title={`${cliLabel} / ${modelText}`}
@@ -328,30 +353,21 @@ export const RealtimeTraceCards = memo(function RealtimeTraceCards({
                       cliKey={trace.cli_key as CliKey}
                       className="h-2.5 w-2.5 shrink-0 rounded-[3px] object-contain"
                     />
-                    <span className="truncate">
-                      {cliLabel} / {modelText}
-                    </span>
+                    <span className="shrink-0">{cliLabel} /</span>
+                    <span className="flex-1 text-center truncate">{modelText}</span>
                   </span>
 
-                  <span
-                    className="inline-flex min-w-0 items-center gap-1 rounded-md bg-slate-100/75 px-2 py-0.5 text-[11px] font-medium text-slate-600 dark:bg-slate-700/55 dark:text-slate-200"
-                    title={providerTitle}
-                  >
-                    <Server className="h-3 w-3 shrink-0 text-slate-400 dark:text-slate-500" />
-                    <span className="truncate">{providerText}</span>
-                  </span>
-
-                  {hasSessionReuse && <SessionReuseBadge showCustomTooltip={showCustomTooltip} />}
                   {isFree && <FreeBadge />}
 
                   {summaryErrorCode && (
-                    <span className="shrink-0 rounded-md bg-amber-50/70 px-2 py-0.5 text-[11px] font-medium text-amber-600 dark:bg-amber-900/20 dark:text-amber-300">
+                    <span className="shrink-0 rounded-md bg-amber-50/80 px-2 py-0.5 text-[11px] font-semibold text-amber-600 ring-1 ring-inset ring-amber-500/10 dark:bg-amber-500/15 dark:text-amber-300 dark:ring-amber-400/20">
                       {getErrorCodeLabel(summaryErrorCode)}
                     </span>
                   )}
 
-                  <span className="ml-auto flex shrink-0 items-center gap-1.5 text-xs text-slate-400 dark:text-slate-500">
-                    <Clock className="h-3 w-3" />
+                  <span className="ml-auto flex w-[150px] shrink-0 items-center justify-end gap-1.5 text-xs text-slate-400 dark:text-slate-500 whitespace-nowrap">
+                    {hasSessionReuse && <SessionReuseBadge showCustomTooltip={showCustomTooltip} />}
+                    <Clock className="h-3 w-3 shrink-0" />
                     {formatUnixSeconds(Math.floor(trace.first_seen_ms / 1000))}
                   </span>
                 </div>
@@ -359,8 +375,8 @@ export const RealtimeTraceCards = memo(function RealtimeTraceCards({
                 <div className="flex items-start gap-3 text-[11px]">
                   <div className="flex w-[110px] shrink-0 flex-col gap-y-0.5" title={providerTitle}>
                     <div className="flex items-center gap-1 h-4">
-                      <Server className="h-3 w-3 text-slate-400 dark:text-slate-500 shrink-0" />
-                      <span className="truncate font-medium text-slate-600 dark:text-slate-400">
+                      <Server className="h-3 w-3 text-slate-400/80 dark:text-slate-500/80 shrink-0" />
+                      <span className="truncate font-semibold text-slate-600 dark:text-slate-300">
                         {providerText}
                       </span>
                     </div>
@@ -385,59 +401,73 @@ export const RealtimeTraceCards = memo(function RealtimeTraceCards({
 
                   <div className="grid flex-1 grid-cols-4 gap-x-3 gap-y-0.5 text-slate-500 dark:text-slate-400">
                     <div className="flex items-center gap-1 h-4" title="Input Tokens">
-                      <span className="text-slate-400 dark:text-slate-500 shrink-0">输入</span>
-                      <span className="font-mono tabular-nums text-slate-600 dark:text-slate-300 truncate">
+                      <span className="text-slate-400/80 dark:text-slate-500/80 shrink-0">
+                        输入
+                      </span>
+                      <span className="font-mono tabular-nums text-slate-700 dark:text-slate-200 truncate">
                         {formatInteger(displayInputTokens)}
                       </span>
                     </div>
                     <div className="flex items-center gap-1 h-4" title="Cache Write">
-                      <span className="text-slate-400 dark:text-slate-500 shrink-0">缓存创建</span>
+                      <span className="text-slate-400/80 dark:text-slate-500/80 shrink-0">
+                        缓存创建
+                      </span>
                       {displayCacheWriteTokens != null ? (
                         <>
-                          <span className="font-mono tabular-nums text-slate-600 dark:text-slate-300 truncate">
+                          <span className="font-mono tabular-nums text-slate-700 dark:text-slate-200 truncate">
                             {formatInteger(displayCacheWriteTokens)}
                           </span>
                           {cacheWrite.ttl && displayCacheWriteTokens > 0 && (
-                            <span className="text-slate-400 dark:text-slate-500 text-[10px]">
+                            <span className="text-slate-400/70 dark:text-slate-500/70 text-[10px]">
                               ({cacheWrite.ttl})
                             </span>
                           )}
                         </>
                       ) : (
-                        <span className="text-slate-300 dark:text-slate-600">—</span>
+                        <span className="text-slate-300/60 dark:text-slate-600/60">—</span>
                       )}
                     </div>
                     <div className="flex items-center gap-1 h-4" title="TTFB">
-                      <span className="text-slate-400 dark:text-slate-500 shrink-0">首字</span>
-                      <span className="font-mono tabular-nums text-slate-600 dark:text-slate-300 truncate">
+                      <span className="text-slate-400/80 dark:text-slate-500/80 shrink-0">
+                        首字
+                      </span>
+                      <span className="font-mono tabular-nums text-slate-700 dark:text-slate-200 truncate">
                         {ttfbMs != null ? formatDurationMs(ttfbMs) : "—"}
                       </span>
                     </div>
                     <div className="flex items-center gap-1 h-4" title="Cost">
-                      <span className="text-slate-400 dark:text-slate-500 shrink-0">花费</span>
-                      <span className="font-mono tabular-nums text-slate-600 dark:text-slate-300 truncate">
+                      <span className="text-slate-400/80 dark:text-slate-500/80 shrink-0">
+                        花费
+                      </span>
+                      <span className="font-mono tabular-nums text-slate-700 dark:text-slate-200 truncate">
                         {displayCostText}
                       </span>
                     </div>
 
                     <div className="flex items-center gap-1 h-4" title="Output Tokens">
-                      <span className="text-slate-400 dark:text-slate-500 shrink-0">输出</span>
-                      <span className="font-mono tabular-nums text-slate-600 dark:text-slate-300 truncate">
+                      <span className="text-slate-400/80 dark:text-slate-500/80 shrink-0">
+                        输出
+                      </span>
+                      <span className="font-mono tabular-nums text-slate-700 dark:text-slate-200 truncate">
                         {formatInteger(displayOutputTokens)}
                       </span>
                     </div>
                     <div className="flex items-center gap-1 h-4" title="Cache Read">
-                      <span className="text-slate-400 dark:text-slate-500 shrink-0">缓存读取</span>
+                      <span className="text-slate-400/80 dark:text-slate-500/80 shrink-0">
+                        缓存读取
+                      </span>
                       {displayCacheReadTokens != null ? (
-                        <span className="font-mono tabular-nums text-slate-600 dark:text-slate-300 truncate">
+                        <span className="font-mono tabular-nums text-slate-700 dark:text-slate-200 truncate">
                           {formatInteger(displayCacheReadTokens)}
                         </span>
                       ) : (
-                        <span className="text-slate-300 dark:text-slate-600">—</span>
+                        <span className="text-slate-300/60 dark:text-slate-600/60">—</span>
                       )}
                     </div>
                     <div className="flex items-center gap-1 h-4" title="Duration">
-                      <span className="text-slate-400 dark:text-slate-500 shrink-0">耗时</span>
+                      <span className="text-slate-400/80 dark:text-slate-500/80 shrink-0">
+                        耗时
+                      </span>
                       <span
                         className={cn(
                           "font-mono tabular-nums truncate",
@@ -457,13 +487,15 @@ export const RealtimeTraceCards = memo(function RealtimeTraceCards({
                           : undefined
                       }
                     >
-                      <span className="text-slate-400 dark:text-slate-500 shrink-0">速率</span>
+                      <span className="text-slate-400/80 dark:text-slate-500/80 shrink-0">
+                        速率
+                      </span>
                       {displayOutputTokensPerSecond != null ? (
-                        <span className="font-mono tabular-nums text-slate-600 dark:text-slate-300 truncate">
+                        <span className="font-mono tabular-nums text-slate-700 dark:text-slate-200 truncate">
                           {formatTokensPerSecondShort(displayOutputTokensPerSecond)}
                         </span>
                       ) : (
-                        <span className="text-slate-300 dark:text-slate-600">—</span>
+                        <span className="text-slate-300/60 dark:text-slate-600/60">—</span>
                       )}
                     </div>
                   </div>
