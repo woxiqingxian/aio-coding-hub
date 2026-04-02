@@ -114,7 +114,7 @@ impl ProviderHealth {
 
 #[derive(Debug)]
 pub struct CircuitBreaker {
-    config: CircuitBreakerConfig,
+    config: Mutex<CircuitBreakerConfig>,
     health: Mutex<HashMap<i64, ProviderHealth>>,
     persist_tx: Option<mpsc::Sender<CircuitPersistedState>>,
 }
@@ -140,22 +140,60 @@ impl CircuitBreaker {
         }
 
         Self {
-            config,
+            config: Mutex::new(config),
             health: Mutex::new(map),
             persist_tx,
         }
     }
 
+    fn read_config(&self) -> CircuitBreakerConfig {
+        self.config.lock_or_recover().clone()
+    }
+
+    /// Hot-reload circuit breaker configuration.
+    /// Recalculates `open_until` for all currently OPEN circuits based on the new duration.
+    pub fn update_config(&self, new_config: CircuitBreakerConfig) {
+        let mut upserts: Vec<CircuitPersistedState> = Vec::new();
+
+        let old_duration = {
+            let guard = self.config.lock_or_recover();
+            guard.open_duration_secs
+        };
+        let new_duration = new_config.open_duration_secs;
+
+        {
+            let mut cfg_guard = self.config.lock_or_recover();
+            *cfg_guard = new_config;
+        }
+
+        if old_duration != new_duration {
+            let mut guard = self.health.lock_or_recover();
+            for (&provider_id, entry) in guard.iter_mut() {
+                if entry.state == CircuitState::Open {
+                    let new_open_until = entry.updated_at.saturating_add(new_duration);
+                    entry.open_until = Some(new_open_until);
+                    upserts.push(Self::persisted_from_health(provider_id, entry));
+                }
+            }
+        }
+
+        for item in upserts {
+            self.try_persist(item);
+        }
+    }
+
     #[allow(dead_code)]
     pub fn snapshot(&self, provider_id: i64, now_unix: i64) -> CircuitSnapshot {
+        let cfg = self.read_config();
         let mut guard = self.health.lock_or_recover();
         let entry = guard
             .entry(provider_id)
             .or_insert_with(|| ProviderHealth::closed(provider_id, now_unix).1);
-        self.snapshot_from_health(provider_id, entry)
+        Self::snapshot_from_health(&cfg, entry)
     }
 
     pub fn should_allow(&self, provider_id: i64, now_unix: i64) -> CircuitCheck {
+        let cfg = self.read_config();
         let mut upsert: Option<CircuitPersistedState> = None;
         let mut transition: Option<CircuitTransition> = None;
 
@@ -183,15 +221,15 @@ impl CircuitBreaker {
                         prev_state: prev,
                         next_state: entry.state,
                         reason: "OPEN_EXPIRED",
-                        snapshot: self.snapshot_from_health(provider_id, entry),
+                        snapshot: Self::snapshot_from_health(&cfg, entry),
                     };
 
                     transition = Some(t);
-                    upsert = Some(self.persisted_from_health(provider_id, entry));
+                    upsert = Some(Self::persisted_from_health(provider_id, entry));
                 }
             }
 
-            let after = self.snapshot_from_health(provider_id, entry);
+            let after = Self::snapshot_from_health(&cfg, entry);
             let cooldown_active = entry.cooldown_until.map(|t| now_unix < t).unwrap_or(false);
             let allow = entry.state != CircuitState::Open && !cooldown_active;
             (after, allow)
@@ -209,6 +247,7 @@ impl CircuitBreaker {
     }
 
     pub fn record_success(&self, provider_id: i64, now_unix: i64) -> CircuitChange {
+        let cfg = self.read_config();
         let mut upsert: Option<CircuitPersistedState> = None;
         let mut transition: Option<CircuitTransition> = None;
 
@@ -218,7 +257,7 @@ impl CircuitBreaker {
                 .entry(provider_id)
                 .or_insert_with(|| ProviderHealth::closed(provider_id, now_unix).1);
 
-            let before = self.snapshot_from_health(provider_id, entry);
+            let before = Self::snapshot_from_health(&cfg, entry);
 
             match entry.state {
                 CircuitState::Closed => {
@@ -226,7 +265,7 @@ impl CircuitBreaker {
                     if entry.failure_count != 0 {
                         entry.failure_count = 0;
                         entry.updated_at = now_unix;
-                        upsert = Some(self.persisted_from_health(provider_id, entry));
+                        upsert = Some(Self::persisted_from_health(provider_id, entry));
                     }
                 }
                 CircuitState::HalfOpen => {
@@ -240,15 +279,15 @@ impl CircuitBreaker {
                         prev_state: prev,
                         next_state: entry.state,
                         reason: "HALF_OPEN_SUCCESS",
-                        snapshot: self.snapshot_from_health(provider_id, entry),
+                        snapshot: Self::snapshot_from_health(&cfg, entry),
                     };
                     transition = Some(t);
-                    upsert = Some(self.persisted_from_health(provider_id, entry));
+                    upsert = Some(Self::persisted_from_health(provider_id, entry));
                 }
                 CircuitState::Open => {}
             }
 
-            let after = self.snapshot_from_health(provider_id, entry);
+            let after = Self::snapshot_from_health(&cfg, entry);
             (before, after)
         };
 
@@ -264,6 +303,7 @@ impl CircuitBreaker {
     }
 
     pub fn record_failure(&self, provider_id: i64, now_unix: i64) -> CircuitChange {
+        let cfg = self.read_config();
         let mut upsert: Option<CircuitPersistedState> = None;
         let mut transition: Option<CircuitTransition> = None;
 
@@ -273,20 +313,19 @@ impl CircuitBreaker {
                 .entry(provider_id)
                 .or_insert_with(|| ProviderHealth::closed(provider_id, now_unix).1);
 
-            let before = self.snapshot_from_health(provider_id, entry);
+            let before = Self::snapshot_from_health(&cfg, entry);
 
             match entry.state {
                 CircuitState::Closed => {
                     entry.failure_count = entry.failure_count.saturating_add(1);
                     entry.updated_at = now_unix;
 
-                    if entry.failure_count >= self.config.failure_threshold {
+                    if entry.failure_count >= cfg.failure_threshold {
                         let prev = entry.state;
                         entry.state = CircuitState::Open;
-                        entry.open_until =
-                            Some(now_unix.saturating_add(self.config.open_duration_secs));
+                        entry.open_until = Some(now_unix.saturating_add(cfg.open_duration_secs));
 
-                        let after = self.snapshot_from_health(provider_id, entry);
+                        let after = Self::snapshot_from_health(&cfg, entry);
                         let t = CircuitTransition {
                             prev_state: prev,
                             next_state: entry.state,
@@ -296,16 +335,15 @@ impl CircuitBreaker {
                         transition = Some(t);
                     }
 
-                    upsert = Some(self.persisted_from_health(provider_id, entry));
+                    upsert = Some(Self::persisted_from_health(provider_id, entry));
                 }
                 CircuitState::HalfOpen => {
                     let prev = entry.state;
                     entry.state = CircuitState::Open;
-                    entry.open_until =
-                        Some(now_unix.saturating_add(self.config.open_duration_secs));
+                    entry.open_until = Some(now_unix.saturating_add(cfg.open_duration_secs));
                     entry.updated_at = now_unix;
 
-                    let after = self.snapshot_from_health(provider_id, entry);
+                    let after = Self::snapshot_from_health(&cfg, entry);
                     let t = CircuitTransition {
                         prev_state: prev,
                         next_state: entry.state,
@@ -313,12 +351,12 @@ impl CircuitBreaker {
                         snapshot: after.clone(),
                     };
                     transition = Some(t);
-                    upsert = Some(self.persisted_from_health(provider_id, entry));
+                    upsert = Some(Self::persisted_from_health(provider_id, entry));
                 }
                 CircuitState::Open => {}
             }
 
-            let after = self.snapshot_from_health(provider_id, entry);
+            let after = Self::snapshot_from_health(&cfg, entry);
             (before, after)
         };
 
@@ -333,21 +371,20 @@ impl CircuitBreaker {
         }
     }
 
-    fn snapshot_from_health(&self, _provider_id: i64, health: &ProviderHealth) -> CircuitSnapshot {
+    fn snapshot_from_health(
+        cfg: &CircuitBreakerConfig,
+        health: &ProviderHealth,
+    ) -> CircuitSnapshot {
         CircuitSnapshot {
             state: health.state,
             failure_count: health.failure_count,
-            failure_threshold: self.config.failure_threshold,
+            failure_threshold: cfg.failure_threshold,
             open_until: health.open_until,
             cooldown_until: health.cooldown_until,
         }
     }
 
-    fn persisted_from_health(
-        &self,
-        provider_id: i64,
-        health: &ProviderHealth,
-    ) -> CircuitPersistedState {
+    fn persisted_from_health(provider_id: i64, health: &ProviderHealth) -> CircuitPersistedState {
         CircuitPersistedState {
             provider_id,
             state: health.state,
@@ -363,6 +400,7 @@ impl CircuitBreaker {
         now_unix: i64,
         cooldown_secs: i64,
     ) -> CircuitSnapshot {
+        let cfg = self.read_config();
         let cooldown_secs = cooldown_secs.max(0);
         if provider_id <= 0 || cooldown_secs == 0 {
             return self.snapshot(provider_id, now_unix);
@@ -380,15 +418,16 @@ impl CircuitBreaker {
         });
         entry.updated_at = now_unix;
 
-        self.snapshot_from_health(provider_id, entry)
+        Self::snapshot_from_health(&cfg, entry)
     }
 
     pub fn reset(&self, provider_id: i64, now_unix: i64) -> CircuitSnapshot {
+        let cfg = self.read_config();
         if provider_id <= 0 {
             return CircuitSnapshot {
                 state: CircuitState::Closed,
                 failure_count: 0,
-                failure_threshold: self.config.failure_threshold,
+                failure_threshold: cfg.failure_threshold,
                 open_until: None,
                 cooldown_until: None,
             };
@@ -406,8 +445,8 @@ impl CircuitBreaker {
             entry.cooldown_until = None;
             entry.updated_at = now_unix;
 
-            let after = self.snapshot_from_health(provider_id, entry);
-            let upsert = self.persisted_from_health(provider_id, entry);
+            let after = Self::snapshot_from_health(&cfg, entry);
+            let upsert = Self::persisted_from_health(provider_id, entry);
             (after, upsert)
         };
 

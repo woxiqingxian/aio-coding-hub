@@ -422,6 +422,16 @@ impl GatewayManager {
         Ok(provider_ids.len())
     }
 
+    pub fn update_circuit_config(&self, failure_threshold: u32, open_duration_secs: i64) {
+        if let Some(r) = &self.running {
+            r.circuit
+                .update_config(circuit_breaker::CircuitBreakerConfig {
+                    failure_threshold,
+                    open_duration_secs,
+                });
+        }
+    }
+
     pub fn take_running(&mut self) -> Option<RunningGatewayHandles> {
         self.running.take().map(|r| {
             // Signal the OAuth refresh loop to stop.

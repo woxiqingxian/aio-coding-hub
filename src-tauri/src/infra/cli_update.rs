@@ -29,6 +29,17 @@ pub struct CliUpdateResult {
     pub error: Option<String>,
 }
 
+/// Extract the leading semver-like portion from a version string.
+/// e.g. "2.1.90 (Claude Code)" → "2.1.90", "v1.0.0-beta" → "1.0.0-beta"
+fn extract_semver(raw: &str) -> &str {
+    let s = raw.trim().trim_start_matches('v');
+    // Take characters until we hit a space or any char that can't be part of semver
+    let end = s
+        .find(|c: char| c == ' ' || c == '(' || c == ')')
+        .unwrap_or(s.len());
+    s[..end].trim_end_matches(|c: char| !c.is_ascii_alphanumeric())
+}
+
 fn npm_package_for_cli_key(cli_key: &str) -> Option<&'static str> {
     match cli_key.trim().to_ascii_lowercase().as_str() {
         "claude" => Some("@anthropic-ai/claude-code"),
@@ -101,8 +112,8 @@ pub async fn cli_check_latest_version(app: &tauri::AppHandle, cli_key: String) -
             let update_available = installed_version
                 .as_ref()
                 .map(|installed| {
-                    let installed_clean = installed.trim_start_matches('v');
-                    let latest_clean = latest_version.trim_start_matches('v');
+                    let installed_clean = extract_semver(installed);
+                    let latest_clean = extract_semver(&latest_version);
                     installed_clean != latest_clean
                 })
                 .unwrap_or(false);
@@ -312,6 +323,15 @@ pub async fn cli_update(app: &tauri::AppHandle, cli_key: String) -> CliUpdateRes
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn extract_semver_strips_suffix_and_prefix() {
+        assert_eq!(extract_semver("2.1.90 (Claude Code)"), "2.1.90");
+        assert_eq!(extract_semver("v2.1.90"), "2.1.90");
+        assert_eq!(extract_semver("2.1.90"), "2.1.90");
+        assert_eq!(extract_semver("1.0.0-beta.1"), "1.0.0-beta.1");
+        assert_eq!(extract_semver("  v3.0.0  "), "3.0.0");
+    }
 
     #[test]
     fn npm_package_mapping_matches_supported_clis() {

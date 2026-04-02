@@ -1,5 +1,7 @@
 //! Usage: Settings-related Tauri commands.
 
+use crate::app_state::GatewayState;
+use crate::shared::mutex_ext::MutexExt;
 use crate::{blocking, resident, settings};
 use tauri::Manager;
 
@@ -360,6 +362,16 @@ pub(crate) async fn settings_set_impl<R: tauri::Runtime>(
 
     app.state::<resident::ResidentState>()
         .set_tray_enabled(next_settings.tray_enabled);
+
+    // Hot-reload circuit breaker config into the running gateway
+    {
+        let gw = app.state::<GatewayState>();
+        let manager = gw.0.lock_or_recover();
+        manager.update_circuit_config(
+            next_settings.circuit_breaker_failure_threshold.max(1),
+            (next_settings.circuit_breaker_open_duration_minutes as i64).saturating_mul(60),
+        );
+    }
 
     tracing::info!(
         preferred_port = next_settings.preferred_port,

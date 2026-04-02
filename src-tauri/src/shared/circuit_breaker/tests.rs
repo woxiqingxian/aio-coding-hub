@@ -144,3 +144,75 @@ fn reset_clears_half_open() {
     assert_eq!(reset.state, CircuitState::Closed);
     assert_eq!(reset.failure_count, 0);
 }
+
+#[test]
+fn update_config_recalculates_open_until() {
+    let cb = breaker(); // default: 30min open duration
+    let pid = 1;
+    let now = 1_000;
+
+    // Trip the circuit breaker
+    for i in 1..=DEFAULT_FAILURE_THRESHOLD {
+        cb.record_failure(pid, now + i as i64);
+    }
+
+    let snap = cb.snapshot(pid, now + 10);
+    assert_eq!(snap.state, CircuitState::Open);
+    let original_open_until = snap.open_until.expect("open_until");
+    // Default: open_until = updated_at + 30*60
+    assert_eq!(
+        original_open_until,
+        (now + DEFAULT_FAILURE_THRESHOLD as i64) + DEFAULT_OPEN_DURATION_SECS
+    );
+
+    // Hot-reload config: reduce to 60 seconds
+    cb.update_config(CircuitBreakerConfig {
+        failure_threshold: DEFAULT_FAILURE_THRESHOLD,
+        open_duration_secs: 60,
+    });
+
+    let snap_after = cb.snapshot(pid, now + 10);
+    assert_eq!(snap_after.state, CircuitState::Open);
+    let new_open_until = snap_after.open_until.expect("open_until");
+    // New: open_until = updated_at + 60
+    assert_eq!(
+        new_open_until,
+        (now + DEFAULT_FAILURE_THRESHOLD as i64) + 60
+    );
+    assert!(new_open_until < original_open_until);
+
+    // Verify circuit expires at the new time
+    let check = cb.should_allow(pid, new_open_until);
+    assert!(check.allow);
+    assert_eq!(check.after.state, CircuitState::HalfOpen);
+}
+
+#[test]
+fn update_config_new_failures_use_new_duration() {
+    let cb = CircuitBreaker::new(
+        CircuitBreakerConfig {
+            failure_threshold: 2,
+            open_duration_secs: 600,
+        },
+        HashMap::new(),
+        None,
+    );
+    let pid = 1;
+    let now = 1_000;
+
+    // Hot-reload to shorter duration BEFORE tripping
+    cb.update_config(CircuitBreakerConfig {
+        failure_threshold: 2,
+        open_duration_secs: 30,
+    });
+
+    // Trip the circuit
+    cb.record_failure(pid, now);
+    cb.record_failure(pid, now + 1);
+
+    let snap = cb.snapshot(pid, now + 2);
+    assert_eq!(snap.state, CircuitState::Open);
+    // open_until should use the new 30s duration, not the original 600s
+    let open_until = snap.open_until.expect("open_until");
+    assert_eq!(open_until, (now + 1) + 30);
+}
