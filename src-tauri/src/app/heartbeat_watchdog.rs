@@ -176,6 +176,7 @@ pub(crate) fn gated_emit<S: serde::Serialize + Clone>(
         .map(|s| s.is_webview_alive())
         .unwrap_or(true);
     if !alive {
+        tracing::debug!(event, "gated_emit: skipped (WebView marked dead)");
         return;
     }
     let _ = app.emit(event, payload);
@@ -414,6 +415,26 @@ mod tests {
         assert!(!should_trip_circuit(RECOVERY_CIRCUIT_THRESHOLD - 1));
         assert!(should_trip_circuit(RECOVERY_CIRCUIT_THRESHOLD));
         assert!(should_trip_circuit(RECOVERY_CIRCUIT_THRESHOLD + 1));
+    }
+
+    #[test]
+    fn webview_alive_lifecycle() {
+        let state = HeartbeatWatchdogState::default();
+
+        // Initially alive.
+        assert!(state.is_webview_alive());
+
+        // Mark dead.
+        state.set_webview_alive(false);
+        assert!(!state.is_webview_alive());
+
+        // Pong restores alive + resets recovery counters.
+        state.set_webview_alive(false);
+        state.record_pong();
+        assert!(state.is_webview_alive());
+        let snap = state.snapshot();
+        assert_eq!(snap.next_recovery_allowed_unix_ms, 0);
+        assert_eq!(snap.circuit_open_until_unix_ms, 0);
     }
 
     #[test]

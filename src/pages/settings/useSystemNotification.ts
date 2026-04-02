@@ -1,21 +1,29 @@
 import { useEffect, useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import { toast } from "sonner";
 import { logToConsole } from "../../services/consoleLog";
 import { noticeSend } from "../../services/notice";
 
 export type NoticePermissionStatus = "checking" | "granted" | "not_granted" | "denied" | "unknown";
 
-type NotificationPluginModule = typeof import("@tauri-apps/plugin-notification");
+/**
+ * Check notification permission via Tauri IPC (native), bypassing the Web API
+ * wrapper in `@tauri-apps/plugin-notification` which uses `window.Notification`
+ * — a permission state that does NOT persist across WKWebView sessions.
+ *
+ * The Rust desktop plugin always returns `Some(true)` (Granted).
+ */
+async function isPermissionGrantedNative(): Promise<boolean> {
+  const result = await invoke<boolean | null>("plugin:notification|is_permission_granted");
+  return result === true;
+}
 
-let notificationPluginPromise: Promise<NotificationPluginModule> | null = null;
-
-function loadNotificationPlugin(): Promise<NotificationPluginModule> {
-  if (notificationPluginPromise) return notificationPluginPromise;
-  notificationPluginPromise = import("@tauri-apps/plugin-notification").catch((err) => {
-    notificationPluginPromise = null;
-    throw err;
-  });
-  return notificationPluginPromise;
+/**
+ * Request notification permission via Tauri IPC (native).
+ * On desktop, this always returns "granted".
+ */
+async function requestPermissionNative(): Promise<string> {
+  return await invoke<string>("plugin:notification|request_permission");
 }
 
 export function useSystemNotification() {
@@ -26,9 +34,8 @@ export function useSystemNotification() {
 
   useEffect(() => {
     let cancelled = false;
-    loadNotificationPlugin()
-      .then(async ({ isPermissionGranted }) => {
-        const granted = await isPermissionGranted();
+    isPermissionGrantedNative()
+      .then((granted) => {
         if (cancelled) return;
         setNoticePermissionStatus(granted ? "granted" : "not_granted");
       })
@@ -48,8 +55,7 @@ export function useSystemNotification() {
     setRequestingNoticePermission(true);
 
     try {
-      const { requestPermission } = await loadNotificationPlugin();
-      const permission = await requestPermission();
+      const permission = await requestPermissionNative();
       const granted = permission === "granted";
       setNoticePermissionStatus(granted ? "granted" : "denied");
       toast(granted ? "系统通知权限已授权" : "系统通知权限已拒绝");
@@ -67,8 +73,7 @@ export function useSystemNotification() {
     setSendingNoticeTest(true);
 
     try {
-      const { isPermissionGranted } = await loadNotificationPlugin();
-      const granted = await isPermissionGranted();
+      const granted = await isPermissionGrantedNative();
       if (!granted) {
         setNoticePermissionStatus("not_granted");
         toast("请先在「系统通知」中授权通知权限");
