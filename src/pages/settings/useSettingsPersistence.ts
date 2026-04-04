@@ -138,7 +138,6 @@ export function useSettingsPersistence(options: {
     pending: PersistedSettings | null;
   }>({ inFlight: false, pending: null });
   const readFailureReportedRef = useRef<string | null>(null);
-  const lastAppliedQueryDataRef = useRef<unknown>(null);
   const lastAppliedDataUpdatedAtRef = useRef<number | null>(null);
   const settingsWriteBlocked = settingsReadErrorMessage !== null;
 
@@ -160,10 +159,8 @@ export function useSettingsPersistence(options: {
     if (settingsValue) {
       const dataUpdatedAt = settingsQuery.dataUpdatedAt ?? 0;
       const hasFreshQueryData =
-        lastAppliedQueryDataRef.current == null ||
-        lastAppliedQueryDataRef.current !== settingsValue ||
-        (lastAppliedDataUpdatedAtRef.current != null &&
-          dataUpdatedAt > lastAppliedDataUpdatedAtRef.current);
+        lastAppliedDataUpdatedAtRef.current == null ||
+        dataUpdatedAt > lastAppliedDataUpdatedAtRef.current;
 
       if (settingsWriteBlocked && !hasFreshQueryData) {
         setSettingsReady(true);
@@ -233,7 +230,6 @@ export function useSettingsPersistence(options: {
 
       persistedSettingsRef.current = nextSettings;
       desiredSettingsRef.current = nextSettings;
-      lastAppliedQueryDataRef.current = settingsValue;
       lastAppliedDataUpdatedAtRef.current = dataUpdatedAt;
 
       if (shouldSyncState) {
