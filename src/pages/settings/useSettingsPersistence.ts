@@ -1,6 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import type { AppAboutInfo } from "../../services/appAbout";
+import type { CliKey } from "../../services/providers";
+import {
+  DEFAULT_CLI_PRIORITY_ORDER,
+  normalizeCliPriorityOrder,
+} from "../../services/cliPriorityOrder";
 import { cliProxySyncEnabled } from "../../services/cliProxy";
 import { logToConsole } from "../../services/consoleLog";
 import {
@@ -23,6 +28,7 @@ type PersistedSettings = {
   show_home_heatmap: boolean;
   show_home_usage: boolean;
   home_usage_period: HomeUsagePeriod;
+  cli_priority_order: CliKey[];
   auto_start: boolean;
   start_minimized: boolean;
   tray_enabled: boolean;
@@ -49,6 +55,7 @@ const DEFAULT_SETTINGS: PersistedSettings = {
   show_home_heatmap: true,
   show_home_usage: true,
   home_usage_period: DEFAULT_HOME_USAGE_PERIOD,
+  cli_priority_order: DEFAULT_CLI_PRIORITY_ORDER,
   auto_start: false,
   start_minimized: false,
   tray_enabled: true,
@@ -74,7 +81,17 @@ type PersistKey = keyof PersistedSettings;
 
 function areSettingsEqual(left: PersistedSettings, right: PersistedSettings) {
   const keys = Object.keys(left) as PersistKey[];
-  return keys.every((key) => left[key] === right[key]);
+  return keys.every((key) => {
+    const leftValue = left[key];
+    const rightValue = right[key];
+    if (Array.isArray(leftValue) && Array.isArray(rightValue)) {
+      return (
+        leftValue.length === rightValue.length &&
+        leftValue.every((item, index) => item === rightValue[index])
+      );
+    }
+    return leftValue === rightValue;
+  });
 }
 
 function isSettingsReadFailure(err: unknown) {
@@ -102,6 +119,9 @@ export function useSettingsPersistence(options: {
   const [showHomeUsage, setShowHomeUsage] = useState<boolean>(DEFAULT_SETTINGS.show_home_usage);
   const [homeUsagePeriod, setHomeUsagePeriod] = useState<HomeUsagePeriod>(
     DEFAULT_SETTINGS.home_usage_period
+  );
+  const [cliPriorityOrder, setCliPriorityOrder] = useState<CliKey[]>(
+    DEFAULT_SETTINGS.cli_priority_order
   );
   const [autoStart, setAutoStart] = useState<boolean>(DEFAULT_SETTINGS.auto_start);
   const [startMinimized, setStartMinimized] = useState<boolean>(DEFAULT_SETTINGS.start_minimized);
@@ -155,6 +175,9 @@ export function useSettingsPersistence(options: {
         show_home_heatmap: settingsValue.show_home_heatmap ?? DEFAULT_SETTINGS.show_home_heatmap,
         show_home_usage: settingsValue.show_home_usage ?? DEFAULT_SETTINGS.show_home_usage,
         home_usage_period: settingsValue.home_usage_period ?? DEFAULT_SETTINGS.home_usage_period,
+        cli_priority_order: normalizeCliPriorityOrder(
+          settingsValue.cli_priority_order ?? DEFAULT_SETTINGS.cli_priority_order
+        ),
         auto_start: settingsValue.auto_start,
         start_minimized: settingsValue.start_minimized ?? DEFAULT_SETTINGS.start_minimized,
         tray_enabled: settingsValue.tray_enabled ?? DEFAULT_SETTINGS.tray_enabled,
@@ -218,6 +241,7 @@ export function useSettingsPersistence(options: {
         setShowHomeHeatmap(nextSettings.show_home_heatmap);
         setShowHomeUsage(nextSettings.show_home_usage);
         setHomeUsagePeriod(nextSettings.home_usage_period);
+        setCliPriorityOrder(nextSettings.cli_priority_order);
         setAutoStart(nextSettings.auto_start);
         setStartMinimized(nextSettings.start_minimized);
         setTrayEnabled(nextSettings.tray_enabled);
@@ -262,7 +286,14 @@ export function useSettingsPersistence(options: {
     const keys = Object.keys(before) as PersistKey[];
     const out: PersistKey[] = [];
     for (const key of keys) {
-      if (before[key] !== after[key]) out.push(key);
+      const beforeValue = before[key];
+      const afterValue = after[key];
+      const changed =
+        Array.isArray(beforeValue) && Array.isArray(afterValue)
+          ? beforeValue.length !== afterValue.length ||
+            beforeValue.some((item, index) => item !== afterValue[index])
+          : beforeValue !== afterValue;
+      if (changed) out.push(key);
     }
     return out;
   }
@@ -291,6 +322,9 @@ export function useSettingsPersistence(options: {
         return;
       case "home_usage_period":
         setHomeUsagePeriod(value as HomeUsagePeriod);
+        return;
+      case "cli_priority_order":
+        setCliPriorityOrder([...(value as CliKey[])]);
         return;
       case "start_minimized":
         setStartMinimized(value as boolean);
@@ -539,6 +573,7 @@ export function useSettingsPersistence(options: {
         showHomeHeatmap: desired.show_home_heatmap,
         showHomeUsage: desired.show_home_usage,
         homeUsagePeriod: desired.home_usage_period,
+        cliPriorityOrder: desired.cli_priority_order,
         autoStart: desired.auto_start,
         startMinimized: desired.start_minimized,
         trayEnabled: desired.tray_enabled,
@@ -577,6 +612,9 @@ export function useSettingsPersistence(options: {
       show_home_heatmap: nextSettings.show_home_heatmap ?? desired.show_home_heatmap,
       show_home_usage: nextSettings.show_home_usage ?? desired.show_home_usage,
       home_usage_period: nextSettings.home_usage_period ?? desired.home_usage_period,
+      cli_priority_order: normalizeCliPriorityOrder(
+        nextSettings.cli_priority_order ?? desired.cli_priority_order
+      ),
       auto_start: nextSettings.auto_start,
       start_minimized: nextSettings.start_minimized ?? desired.start_minimized,
       tray_enabled: nextSettings.tray_enabled ?? desired.tray_enabled,
@@ -731,6 +769,8 @@ export function useSettingsPersistence(options: {
     setShowHomeUsage,
     homeUsagePeriod,
     setHomeUsagePeriod,
+    cliPriorityOrder,
+    setCliPriorityOrder,
     autoStart,
     setAutoStart,
     startMinimized,
