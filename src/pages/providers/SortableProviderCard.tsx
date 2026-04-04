@@ -161,12 +161,6 @@ export function SortableProviderCard({
 
   const circuitState = useMemo(() => getGatewayCircuitDerivedState(circuit), [circuit]);
   const { isUnavailable, unavailableUntil } = circuitState;
-  const nowUnix = useNowUnix(isUnavailable);
-  const unavailableRemaining =
-    unavailableUntil != null ? Math.max(0, unavailableUntil - nowUnix) : null;
-  const unavailableCountdown =
-    unavailableRemaining != null ? formatCountdownSeconds(unavailableRemaining) : null;
-
   const isOAuth = provider.auth_mode === "oauth";
   const [apiKeyDetailsVisible, setApiKeyDetailsVisible] = useState(false);
   const [oauthLimits, setOauthLimits] = useState<OAuthLimitsResult | null>(
@@ -174,6 +168,42 @@ export function SortableProviderCard({
   );
   const [limitsLoading, setLimitsLoading] = useState(false);
   const oauthShortLabel = getOAuthShortWindowLabel(provider, oauthLimits);
+  const shouldTrackNowUnix =
+    isUnavailable ||
+    (isOAuth &&
+      oauthLimits != null &&
+      (oauthLimits.limit_5h_reset_at != null || oauthLimits.limit_weekly_reset_at != null));
+  const nowUnix = useNowUnix(shouldTrackNowUnix);
+  const unavailableRemaining =
+    unavailableUntil != null ? Math.max(0, unavailableUntil - nowUnix) : null;
+  const unavailableCountdown =
+    unavailableRemaining != null ? formatCountdownSeconds(unavailableRemaining) : null;
+
+  // OAuth 限制重置倒计时
+  const limitsResetCountdown = useMemo(() => {
+    if (!isOAuth || !oauthLimits) return null;
+    const reset5h = oauthLimits.limit_5h_reset_at;
+    const resetWeekly = oauthLimits.limit_weekly_reset_at;
+    if (!reset5h && !resetWeekly) return null;
+
+    const formatReset = (timestamp: number) => {
+      const diff = timestamp - nowUnix;
+      if (diff <= 0) return "已重置";
+      const totalMinutes = Math.floor(diff / 60);
+      if (totalMinutes < 1) return "<1m";
+      const days = Math.floor(totalMinutes / 1440);
+      const hours = Math.floor((totalMinutes % 1440) / 60);
+      const minutes = totalMinutes % 60;
+      if (days > 0) return `${days}d ${hours}h ${minutes}m`;
+      if (hours > 0) return `${hours}h ${minutes}m`;
+      return `${minutes}m`;
+    };
+
+    return {
+      reset5h: reset5h ? formatReset(reset5h) : null,
+      resetWeekly: resetWeekly ? formatReset(resetWeekly) : null,
+    };
+  }, [isOAuth, oauthLimits, nowUnix]);
 
   useEffect(() => {
     // Disconnect switches auth_mode back to api_key; drop stale OAuth limits cache.
@@ -183,6 +213,19 @@ export function SortableProviderCard({
     }
     oauthLimitsCache.delete(provider.id);
     setOauthLimits(null);
+  }, [isOAuth, provider.id]);
+
+  // 组件加载时获取 OAuth limits
+  useEffect(() => {
+    if (!isOAuth) return;
+    const cached = oauthLimitsCache.get(provider.id);
+    if (cached) {
+      setOauthLimits(cached);
+    } else {
+      fetchLimits();
+    }
+    const interval = setInterval(fetchLimits, 60000);
+    return () => clearInterval(interval);
   }, [isOAuth, provider.id]);
 
   async function fetchLimits() {
@@ -351,6 +394,22 @@ export function SortableProviderCard({
                       title={`周用量: ${oauthLimits.limit_weekly_text}`}
                     >
                       周: {oauthLimits.limit_weekly_text}
+                    </span>
+                  ) : null}
+                  {limitsResetCountdown?.reset5h && oauthLimits?.limit_5h_text ? (
+                    <span
+                      className="shrink-0 font-mono text-xs text-slate-500 dark:text-slate-400 cursor-default"
+                      title={`${oauthShortLabel} 重置: ${limitsResetCountdown.reset5h}`}
+                    >
+                      重置: {limitsResetCountdown.reset5h}
+                    </span>
+                  ) : null}
+                  {limitsResetCountdown?.resetWeekly && oauthLimits?.limit_weekly_text ? (
+                    <span
+                      className="shrink-0 font-mono text-xs text-slate-500 dark:text-slate-400 cursor-default"
+                      title={`周重置: ${limitsResetCountdown.resetWeekly}`}
+                    >
+                      周重置: {limitsResetCountdown.resetWeekly}
                     </span>
                   ) : null}
                 </>

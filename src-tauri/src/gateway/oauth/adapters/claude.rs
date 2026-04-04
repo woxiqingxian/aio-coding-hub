@@ -2,6 +2,7 @@
 
 use crate::gateway::oauth::provider_trait::*;
 use axum::http::{HeaderMap, HeaderValue};
+use chrono::DateTime;
 use std::future::Future;
 use std::pin::Pin;
 
@@ -147,10 +148,27 @@ impl OAuthProvider for ClaudeOAuthProvider {
                 return Err(format!("claude limits fetch status: {}", resp.status()));
             }
 
-            let json: serde_json::Value = resp
+            let mut json: serde_json::Value = resp
                 .json()
                 .await
                 .map_err(|e| format!("claude limits parse failed: {e}"))?;
+            // Convert ISO 8601 resets_at to Unix seconds for frontend countdown
+            fn inject_reset_at_unix(json: &mut serde_json::Value, key: &str) {
+                if let Some(window) = json.get_mut(key) {
+                    if let Some(resets_at) = window.get("resets_at").and_then(|v| v.as_str()) {
+                        if let Ok(dt) = DateTime::parse_from_rfc3339(resets_at) {
+                            if let Some(obj) = window.as_object_mut() {
+                                obj.insert(
+                                    "reset_at".to_string(),
+                                    serde_json::json!(dt.timestamp()),
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+            inject_reset_at_unix(&mut json, "five_hour");
+            inject_reset_at_unix(&mut json, "seven_day");
 
             Ok(OAuthLimitsResult {
                 raw_json: Some(json),

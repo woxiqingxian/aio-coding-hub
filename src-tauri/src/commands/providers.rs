@@ -952,27 +952,38 @@ pub(crate) async fn provider_oauth_fetch_limits(
 
     // If the adapter already parsed limit texts, use them directly.
     // Otherwise, try to parse from raw_json based on cli_key.
-    let (limit_5h_text, limit_weekly_text) =
+    let (limit_5h_text, limit_weekly_text, limit_5h_reset_at, limit_weekly_reset_at) =
         if limits.limit_5h_text.is_some() || limits.limit_weekly_text.is_some() {
+            let resets = limits
+                .raw_json
+                .as_ref()
+                .map(extract_reset_timestamps)
+                .unwrap_or((None, None));
             (
                 limits.limit_5h_text.clone(),
                 limits.limit_weekly_text.clone(),
+                resets.0,
+                resets.1,
             )
         } else if let Some(ref raw) = limits.raw_json {
             let cli_key = adapter.cli_key();
-            match cli_key {
+            let (text_5h, text_weekly) = match cli_key {
                 "codex" => parse_codex_limits(raw),
                 "claude" => parse_claude_limits(raw),
                 _ => (None, None),
-            }
+            };
+            let resets = extract_reset_timestamps(raw);
+            (text_5h, text_weekly, resets.0, resets.1)
         } else {
-            (None, None)
+            (None, None, None, None)
         };
 
     Ok(serde_json::json!({
         "limit_short_label": limit_short_label,
         "limit_5h_text": limit_5h_text,
         "limit_weekly_text": limit_weekly_text,
+        "limit_5h_reset_at": limit_5h_reset_at,
+        "limit_weekly_reset_at": limit_weekly_reset_at,
         "raw_json": limits.raw_json,
     }))
 }
@@ -1037,18 +1048,27 @@ fn format_percent_label(value: f64) -> String {
     format!("{:.0}%", value.clamp(0.0, 100.0))
 }
 
-fn parse_codex_limits(body: &serde_json::Value) -> (Option<String>, Option<String>) {
+fn resolve_rate_windows(
+    body: &serde_json::Value,
+) -> (Option<&serde_json::Value>, Option<&serde_json::Value>) {
     let rate_limit = body.get("rate_limit").unwrap_or(body);
     let primary = rate_limit
         .get("primary_window")
         .or_else(|| rate_limit.get("primaryWindow"))
+        .or_else(|| body.get("five_hour"))
         .or_else(|| body.get("5_hour_window"))
         .or_else(|| body.get("fiveHourWindow"));
     let secondary = rate_limit
         .get("secondary_window")
         .or_else(|| rate_limit.get("secondaryWindow"))
+        .or_else(|| body.get("seven_day"))
         .or_else(|| body.get("weekly_window"))
         .or_else(|| body.get("weeklyWindow"));
+    (primary, secondary)
+}
+
+fn parse_codex_limits(body: &serde_json::Value) -> (Option<String>, Option<String>) {
+    let (primary, secondary) = resolve_rate_windows(body);
 
     let limit_5h = primary
         .and_then(parse_remaining_percent_from_window)
@@ -1082,6 +1102,22 @@ fn parse_claude_limits(body: &serde_json::Value) -> (Option<String>, Option<Stri
         .and_then(extract_utilization)
         .map(|used| format_percent_label(100.0 - used));
     (limit_5h, limit_weekly)
+}
+fn extract_reset_timestamp(window: &serde_json::Value) -> Option<i64> {
+    window
+        .get("reset_at")
+        .or_else(|| window.get("resetAt"))
+        .or_else(|| window.get("resets_at"))
+        .or_else(|| window.get("resetsAt"))
+        .and_then(serde_json::Value::as_i64)
+}
+
+fn extract_reset_timestamps(body: &serde_json::Value) -> (Option<i64>, Option<i64>) {
+    let (primary, secondary) = resolve_rate_windows(body);
+    (
+        primary.and_then(extract_reset_timestamp),
+        secondary.and_then(extract_reset_timestamp),
+    )
 }
 
 #[cfg(test)]
@@ -1334,6 +1370,54 @@ mod tests {
             normalize_oauth_short_window_label("codex", Some("custom")).as_deref(),
             Some("custom")
         );
+    }
+
+    #[test]
+    fn resolve_rate_windows_prefers_rate_limit_windows_and_supports_fallback_shapes() {
+        let nested = serde_json::json!({
+            "rate_limit": {
+                "primaryWindow": { "remaining_count": 1, "total_count": 2 },
+                "secondary_window": { "remaining_count": 3, "total_count": 4 }
+            },
+            "five_hour": { "remaining_count": 9, "total_count": 10 },
+            "weekly_window": { "remaining_count": 8, "total_count": 10 }
+        });
+        let (primary, secondary) = resolve_rate_windows(&nested);
+        assert_eq!(
+            primary.and_then(parse_remaining_percent_from_window),
+            Some(50.0)
+        );
+        assert_eq!(
+            secondary.and_then(parse_remaining_percent_from_window),
+            Some(75.0)
+        );
+
+        let fallback = serde_json::json!({
+            "five_hour": { "remaining_count": 2, "total_count": 8 },
+            "weekly_window": { "remaining_count": 1, "total_count": 4 }
+        });
+        let (primary, secondary) = resolve_rate_windows(&fallback);
+        assert_eq!(
+            primary.and_then(parse_remaining_percent_from_window),
+            Some(25.0)
+        );
+        assert_eq!(
+            secondary.and_then(parse_remaining_percent_from_window),
+            Some(25.0)
+        );
+    }
+
+    #[test]
+    fn parse_codex_limits_supports_five_hour_fallback_window_shape() {
+        let body = serde_json::json!({
+            "five_hour": { "remaining_count": 1, "total_count": 2 },
+            "weekly_window": { "remaining_count": 3, "total_count": 4 }
+        });
+
+        let (limit_5h, limit_weekly) = parse_codex_limits(&body);
+
+        assert_eq!(limit_5h.as_deref(), Some("50%"));
+        assert_eq!(limit_weekly.as_deref(), Some("75%"));
     }
 
     #[test]
