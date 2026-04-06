@@ -105,10 +105,11 @@ describe("components/home/RealtimeTraceCards", () => {
     );
 
     expect(screen.getByText("进行中")).toBeInTheDocument();
+    expect(screen.getByText("当前阶段")).toBeInTheDocument();
+    expect(screen.getByText("等待首个尝试")).toBeInTheDocument();
+    expect(screen.getByText("尝试次数")).toBeInTheDocument();
     expect(screen.getAllByText("未知").length).toBeGreaterThan(0); // model/provider fallback
     expect(screen.getAllByText("P3").length).toBeGreaterThan(0);
-    expect(screen.getByLabelText("服务提供商 P3")).toBeInTheDocument();
-    expect(screen.getByLabelText("服务提供商 P2")).toBeInTheDocument();
     expect(screen.getByText("流中断")).toBeInTheDocument();
     expect(screen.getAllByText("会话复用").length).toBeGreaterThan(0);
     expect(screen.getByTitle("P1 → P2")).toBeInTheDocument();

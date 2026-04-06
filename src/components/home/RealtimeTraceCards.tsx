@@ -196,6 +196,9 @@ export const RealtimeTraceCards = memo(function RealtimeTraceCards({
         const hasSessionReuse = (trace.attempts ?? []).some(
           (attempt) => attempt.session_reuse === true
         );
+        const latestAttempt = (trace.attempts ?? [])
+          .slice()
+          .sort((a, b) => b.attempt_index - a.attempt_index)[0];
 
         const providerText = attemptRoute.providerText;
 
@@ -291,7 +294,17 @@ export const RealtimeTraceCards = memo(function RealtimeTraceCards({
               ? attemptRoute.segments.map((seg) => seg.provider).join(" → ")
               : null;
         const providerTitle = providerText;
-
+        const liveStageText = (() => {
+          if (!isInProgress) return null;
+          if (!latestAttempt) return "等待首个尝试";
+          if (hasFailover) return "切换处理中";
+          if (latestAttempt.outcome === "started") return "处理中";
+          return "等待结果";
+        })();
+        const liveRouteText =
+          routeSummary !== "—"
+            ? routeSummary
+            : latestAttempt?.provider_name?.trim() || providerText || "等待 provider";
         return (
           <div
             key={trace.trace_id}
@@ -299,7 +312,7 @@ export const RealtimeTraceCards = memo(function RealtimeTraceCards({
               "transform overflow-hidden transition-all ease-out motion-reduce:transition-none motion-reduce:transform-none",
               isExiting
                 ? "max-h-0 opacity-0 scale-y-95 !mt-0 !mb-0 duration-400 ease-in"
-                : "max-h-[120px] opacity-100 scale-y-100 duration-300 ease-out my-1.5 mx-2"
+                : "max-h-[220px] opacity-100 scale-y-100 duration-300 ease-out my-1.5 mx-2"
             )}
           >
             <div
@@ -357,15 +370,6 @@ export const RealtimeTraceCards = memo(function RealtimeTraceCards({
                     <span className="truncate">{modelText}</span>
                   </span>
 
-                  <span
-                    aria-label={`服务提供商 ${providerText}`}
-                    className="inline-flex min-w-0 items-center gap-1 rounded-md bg-slate-100/75 px-2 py-0.5 text-[11px] font-medium text-slate-600 dark:bg-slate-700/55 dark:text-slate-200"
-                    title={providerTitle}
-                  >
-                    <Server className="h-3 w-3 shrink-0 text-slate-400 dark:text-slate-500" />
-                    <span className="truncate">{providerText}</span>
-                  </span>
-
                   {isFree && <FreeBadge />}
 
                   {summaryErrorCode && (
@@ -381,134 +385,162 @@ export const RealtimeTraceCards = memo(function RealtimeTraceCards({
                   </span>
                 </div>
 
-                <div className="flex items-start gap-3 text-[11px]">
-                  <div className="flex w-[110px] shrink-0 flex-col gap-y-0.5" title={providerTitle}>
-                    <div className="flex items-center gap-1 h-4">
-                      <Server className="h-3 w-3 text-slate-400/80 dark:text-slate-500/80 shrink-0" />
-                      <span className="truncate font-semibold text-slate-600 dark:text-slate-300">
-                        {providerText}
-                      </span>
+                {isInProgress ? (
+                  <div className="grid grid-cols-2 gap-2 text-[11px] lg:grid-cols-[fit-content(180px)_fit-content(96px)_fit-content(128px)_minmax(0,1fr)]">
+                    <div className="rounded-md border border-indigo-200/60 bg-indigo-50/70 px-2.5 py-2 dark:border-indigo-500/20 dark:bg-indigo-500/10">
+                      <div className="text-slate-400 dark:text-slate-500">当前阶段</div>
+                      <div className="mt-1 truncate font-semibold text-indigo-600 dark:text-indigo-300">
+                        {liveStageText}
+                      </div>
                     </div>
-                    <div className="flex items-center h-4">
-                      <div className="flex min-w-0 w-full items-center gap-1">
-                        {routeLabel && routeTooltipText ? (
-                          <span
-                            className="cursor-help text-[11px] text-slate-400 dark:text-slate-500"
-                            title={routeTooltipText}
-                          >
-                            {routeLabel}
-                          </span>
-                        ) : null}
-                        {showCostMultiplier ? (
-                          <span className="inline-flex shrink-0 items-center text-[11px] font-medium text-slate-500 dark:text-slate-400">
-                            {costMultiplierText}
-                          </span>
-                        ) : null}
+                    <div className="rounded-md border border-slate-200/70 bg-slate-50/80 px-2.5 py-2 dark:border-slate-700/70 dark:bg-slate-800/70">
+                      <div className="text-slate-400 dark:text-slate-500">尝试次数</div>
+                      <div className="mt-1 truncate font-mono tabular-nums text-slate-700 dark:text-slate-200">
+                        {formatInteger(trace.attempts.length)}
+                      </div>
+                    </div>
+                    <div className="rounded-md border border-slate-200/70 bg-slate-50/80 px-2.5 py-2 dark:border-slate-700/70 dark:bg-slate-800/70">
+                      <div className="text-slate-400 dark:text-slate-500">已运行</div>
+                      <div className="mt-1 truncate font-mono tabular-nums font-medium text-indigo-600 dark:text-indigo-300">
+                        {formatDurationMs(runningMs)}
+                      </div>
+                    </div>
+                    <div className="rounded-md border border-slate-200/70 bg-slate-50/80 px-2.5 py-2 dark:border-slate-700/70 dark:bg-slate-800/70">
+                      <div className="text-slate-400 dark:text-slate-500">当前链路</div>
+                      <div
+                        className="mt-1 truncate font-medium text-slate-700 dark:text-slate-200"
+                        title={routeTooltipText ?? liveRouteText}
+                      >
+                        {liveRouteText}
                       </div>
                     </div>
                   </div>
-
-                  <div className="grid flex-1 grid-cols-4 gap-x-3 gap-y-0.5 text-slate-500 dark:text-slate-400">
-                    <div className="flex items-center gap-1 h-4" title="Input Tokens">
-                      <span className="text-slate-400/80 dark:text-slate-500/80 shrink-0">
-                        输入
-                      </span>
-                      <span className="font-mono tabular-nums text-slate-700 dark:text-slate-200 truncate">
-                        {formatInteger(displayInputTokens)}
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-1 h-4" title="Cache Write">
-                      <span className="text-slate-400/80 dark:text-slate-500/80 shrink-0">
-                        缓存创建
-                      </span>
-                      {displayCacheWriteTokens != null ? (
-                        <>
-                          <span className="font-mono tabular-nums text-slate-700 dark:text-slate-200 truncate">
-                            {formatInteger(displayCacheWriteTokens)}
-                          </span>
-                          {cacheWrite.ttl && displayCacheWriteTokens > 0 && (
-                            <span className="text-slate-400/70 dark:text-slate-500/70 text-[10px]">
-                              ({cacheWrite.ttl})
-                            </span>
-                          )}
-                        </>
-                      ) : (
-                        <span className="text-slate-300/60 dark:text-slate-600/60">—</span>
-                      )}
-                    </div>
-                    <div className="flex items-center gap-1 h-4" title="TTFB">
-                      <span className="text-slate-400/80 dark:text-slate-500/80 shrink-0">
-                        首字
-                      </span>
-                      <span className="font-mono tabular-nums text-slate-700 dark:text-slate-200 truncate">
-                        {ttfbMs != null ? formatDurationMs(ttfbMs) : "—"}
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-1 h-4" title="Cost">
-                      <span className="text-slate-400/80 dark:text-slate-500/80 shrink-0">
-                        花费
-                      </span>
-                      <span className="font-mono tabular-nums text-slate-700 dark:text-slate-200 truncate">
-                        {displayCostText}
-                      </span>
-                    </div>
-
-                    <div className="flex items-center gap-1 h-4" title="Output Tokens">
-                      <span className="text-slate-400/80 dark:text-slate-500/80 shrink-0">
-                        输出
-                      </span>
-                      <span className="font-mono tabular-nums text-slate-700 dark:text-slate-200 truncate">
-                        {formatInteger(displayOutputTokens)}
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-1 h-4" title="Cache Read">
-                      <span className="text-slate-400/80 dark:text-slate-500/80 shrink-0">
-                        缓存读取
-                      </span>
-                      {displayCacheReadTokens != null ? (
-                        <span className="font-mono tabular-nums text-slate-700 dark:text-slate-200 truncate">
-                          {formatInteger(displayCacheReadTokens)}
-                        </span>
-                      ) : (
-                        <span className="text-slate-300/60 dark:text-slate-600/60">—</span>
-                      )}
-                    </div>
-                    <div className="flex items-center gap-1 h-4" title="Duration">
-                      <span className="text-slate-400/80 dark:text-slate-500/80 shrink-0">
-                        耗时
-                      </span>
-                      <span
-                        className={cn(
-                          "font-mono tabular-nums truncate",
-                          isInProgress
-                            ? "text-indigo-600 dark:text-indigo-400 font-medium"
-                            : "text-slate-600 dark:text-slate-300"
-                        )}
-                      >
-                        {formatDurationMs(runningMs)}
-                      </span>
-                    </div>
+                ) : (
+                  <div className="flex items-start gap-3 text-[11px]">
                     <div
-                      className="flex items-center gap-1 h-4"
-                      title={
-                        displayOutputTokensPerSecond != null
-                          ? formatTokensPerSecond(displayOutputTokensPerSecond)
-                          : undefined
-                      }
+                      className="flex w-[110px] shrink-0 flex-col gap-y-0.5"
+                      title={providerTitle}
                     >
-                      <span className="text-slate-400/80 dark:text-slate-500/80 shrink-0">
-                        速率
-                      </span>
-                      {displayOutputTokensPerSecond != null ? (
-                        <span className="font-mono tabular-nums text-slate-700 dark:text-slate-200 truncate">
-                          {formatTokensPerSecondShort(displayOutputTokensPerSecond)}
+                      <div className="flex items-center gap-1 h-4">
+                        <Server className="h-3 w-3 text-slate-400/80 dark:text-slate-500/80 shrink-0" />
+                        <span className="truncate font-semibold text-slate-600 dark:text-slate-300">
+                          {providerText}
                         </span>
-                      ) : (
-                        <span className="text-slate-300/60 dark:text-slate-600/60">—</span>
-                      )}
+                      </div>
+                      <div className="flex items-center h-4">
+                        <div className="flex min-w-0 w-full items-center gap-1">
+                          {routeLabel && routeTooltipText ? (
+                            <span
+                              className="cursor-help text-[11px] text-slate-400 dark:text-slate-500"
+                              title={routeTooltipText}
+                            >
+                              {routeLabel}
+                            </span>
+                          ) : null}
+                          {showCostMultiplier ? (
+                            <span className="inline-flex shrink-0 items-center text-[11px] font-medium text-slate-500 dark:text-slate-400">
+                              {costMultiplierText}
+                            </span>
+                          ) : null}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="grid flex-1 grid-cols-4 gap-x-3 gap-y-0.5 text-slate-500 dark:text-slate-400">
+                      <div className="flex items-center gap-1 h-4" title="Input Tokens">
+                        <span className="text-slate-400/80 dark:text-slate-500/80 shrink-0">
+                          输入
+                        </span>
+                        <span className="font-mono tabular-nums text-slate-700 dark:text-slate-200 truncate">
+                          {formatInteger(displayInputTokens)}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-1 h-4" title="Cache Write">
+                        <span className="text-slate-400/80 dark:text-slate-500/80 shrink-0">
+                          缓存创建
+                        </span>
+                        {displayCacheWriteTokens != null ? (
+                          <>
+                            <span className="font-mono tabular-nums text-slate-700 dark:text-slate-200 truncate">
+                              {formatInteger(displayCacheWriteTokens)}
+                            </span>
+                            {cacheWrite.ttl && displayCacheWriteTokens > 0 && (
+                              <span className="text-slate-400/70 dark:text-slate-500/70 text-[10px]">
+                                ({cacheWrite.ttl})
+                              </span>
+                            )}
+                          </>
+                        ) : (
+                          <span className="text-slate-300/60 dark:text-slate-600/60">—</span>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-1 h-4" title="TTFB">
+                        <span className="text-slate-400/80 dark:text-slate-500/80 shrink-0">
+                          首字
+                        </span>
+                        <span className="font-mono tabular-nums text-slate-700 dark:text-slate-200 truncate">
+                          {ttfbMs != null ? formatDurationMs(ttfbMs) : "—"}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-1 h-4" title="Cost">
+                        <span className="text-slate-400/80 dark:text-slate-500/80 shrink-0">
+                          花费
+                        </span>
+                        <span className="font-mono tabular-nums text-slate-700 dark:text-slate-200 truncate">
+                          {displayCostText}
+                        </span>
+                      </div>
+
+                      <div className="flex items-center gap-1 h-4" title="Output Tokens">
+                        <span className="text-slate-400/80 dark:text-slate-500/80 shrink-0">
+                          输出
+                        </span>
+                        <span className="font-mono tabular-nums text-slate-700 dark:text-slate-200 truncate">
+                          {formatInteger(displayOutputTokens)}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-1 h-4" title="Cache Read">
+                        <span className="text-slate-400/80 dark:text-slate-500/80 shrink-0">
+                          缓存读取
+                        </span>
+                        {displayCacheReadTokens != null ? (
+                          <span className="font-mono tabular-nums text-slate-700 dark:text-slate-200 truncate">
+                            {formatInteger(displayCacheReadTokens)}
+                          </span>
+                        ) : (
+                          <span className="text-slate-300/60 dark:text-slate-600/60">—</span>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-1 h-4" title="Duration">
+                        <span className="text-slate-400/80 dark:text-slate-500/80 shrink-0">
+                          耗时
+                        </span>
+                        <span className="font-mono tabular-nums text-slate-600 dark:text-slate-300 truncate">
+                          {formatDurationMs(runningMs)}
+                        </span>
+                      </div>
+                      <div
+                        className="flex items-center gap-1 h-4"
+                        title={
+                          displayOutputTokensPerSecond != null
+                            ? formatTokensPerSecond(displayOutputTokensPerSecond)
+                            : undefined
+                        }
+                      >
+                        <span className="text-slate-400/80 dark:text-slate-500/80 shrink-0">
+                          速率
+                        </span>
+                        {displayOutputTokensPerSecond != null ? (
+                          <span className="font-mono tabular-nums text-slate-700 dark:text-slate-200 truncate">
+                            {formatTokensPerSecondShort(displayOutputTokensPerSecond)}
+                          </span>
+                        ) : (
+                          <span className="text-slate-300/60 dark:text-slate-600/60">—</span>
+                        )}
+                      </div>
                     </div>
                   </div>
-                </div>
+                )}
               </div>
             </div>
           </div>

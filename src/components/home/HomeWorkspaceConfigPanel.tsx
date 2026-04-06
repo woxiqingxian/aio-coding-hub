@@ -19,7 +19,7 @@ const ICON_BY_TYPE: Record<HomeWorkspaceConfigItemType, LucideIcon> = {
 };
 export type HomeWorkspaceConfigPanelProps = {
   configs: HomeCliWorkspaceConfig[];
-  selectedCliKey: CliKey;
+  selectedCliKey: CliKey | null;
   onSelectCliKey: (cliKey: CliKey) => void;
   sortModes: SortModeSummary[];
   sortModesLoading: boolean;

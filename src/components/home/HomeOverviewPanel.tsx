@@ -409,7 +409,7 @@ export function HomeOverviewPanel({
     if (fallbackCliKey) setSelectedWorkspaceConfigCliKey(fallbackCliKey);
   }, [displayedWorkspaceConfigs, selectedWorkspaceConfigCliKey]);
   const effectiveSelectedWorkspaceConfigCliKey =
-    selectedWorkspaceConfigCliKey ?? displayedWorkspaceConfigs[0]?.cliKey ?? "claude";
+    selectedWorkspaceConfigCliKey ?? displayedWorkspaceConfigs[0]?.cliKey ?? null;
 
   useEffect(() => {
     const previousOpenCircuitKeys = previousOpenCircuitKeysRef.current;

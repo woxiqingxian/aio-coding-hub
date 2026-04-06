@@ -46,7 +46,7 @@ vi.mock("../HomeWorkspaceConfigPanel", () => ({
       workspaceName: string | null;
       items: Array<{ id: string; name: string }>;
     }>;
-    selectedCliKey: "claude" | "codex" | "gemini";
+    selectedCliKey: "claude" | "codex" | "gemini" | null;
     onSelectCliKey: (cliKey: "claude" | "codex" | "gemini") => void;
     sortModes: Array<{ id: number; name: string }>;
     activeModeByCli: Record<"claude" | "codex" | "gemini", number | null>;

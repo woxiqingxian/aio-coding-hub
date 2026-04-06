@@ -254,7 +254,7 @@ describe("components/home/HomeRequestLogsPanel", () => {
       </MemoryRouter>
     );
 
-    expect(screen.getByText("进行中")).toBeInTheDocument();
+    expect(screen.getAllByText("进行中").length).toBeGreaterThan(0);
     expect(screen.getByRole("button", { name: /claude-3-opus/ })).toBeInTheDocument();
   });
 
@@ -826,8 +826,13 @@ describe("components/home/HomeRequestLogsPanel", () => {
     );
 
     expect(screen.getAllByTitle("Codex / gpt-5.4").length).toBeGreaterThan(0);
+    expect(screen.getAllByTitle("Claude Code / claude-sonnet-4").length).toBeGreaterThan(0);
+    expect(screen.getAllByTitle("Gemini / gemini-2.5-pro").length).toBeGreaterThan(0);
     expect(screen.getAllByText("免费").length).toBeGreaterThan(0);
-    expect(screen.getByText("进行中")).toBeInTheDocument();
+    expect(screen.getAllByText("进行中").length).toBeGreaterThan(0);
+    expect(screen.getByText("切换处理中")).toBeInTheDocument();
+    expect(screen.getByText("等待首个尝试")).toBeInTheDocument();
+    expect(screen.getByText("Claude Main → Claude Backup")).toBeInTheDocument();
     expect(screen.queryByText("当前没有最近使用记录")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "关闭预览" })).not.toBeInTheDocument();
   });
