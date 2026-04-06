@@ -430,9 +430,13 @@ export function HomeOverviewPanel({
     previousOpenCircuitKeysRef.current = openCircuitKeys;
 
     if (openCircuitChanged) {
-      setSessionsTab("circuit");
+      if (logsPrimaryLayout && openCircuitKeys.length === 0) {
+        setSessionsTab("workspaceConfig");
+      } else {
+        setSessionsTab("circuit");
+      }
     }
-  }, [openCircuitKeys]);
+  }, [logsPrimaryLayout, openCircuitKeys]);
 
   useEffect(() => {
     if (!logsPrimaryLayout) return;
@@ -446,6 +450,9 @@ export function HomeOverviewPanel({
       devPreviewEnabled={devPreviewEnabled}
       showSummaryText={false}
       showOpenLogsPageButton={false}
+      showRefreshButton={!logsPrimaryLayout}
+      showCompactModeToggle={!logsPrimaryLayout}
+      compactModeOverride={logsPrimaryLayout ? true : undefined}
       traces={traces}
       requestLogs={requestLogs}
       requestLogsLoading={requestLogsLoading}

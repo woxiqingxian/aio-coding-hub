@@ -514,6 +514,7 @@ export type HomeRequestLogsPanelProps = {
   showSummaryText?: boolean;
   summaryTextOverride?: string;
   showOpenLogsPageButton?: boolean;
+  showRefreshButton?: boolean;
   showCompactModeToggle?: boolean;
   compactModeOverride?: boolean;
   emptyStateTitle?: string;
@@ -537,6 +538,7 @@ export function HomeRequestLogsPanel({
   showSummaryText = true,
   summaryTextOverride,
   showOpenLogsPageButton = true,
+  showRefreshButton = true,
   showCompactModeToggle = true,
   compactModeOverride,
   emptyStateTitle = "当前没有最近使用记录",
@@ -700,21 +702,25 @@ export function HomeRequestLogsPanel({
               <ArrowUpRight className="h-3.5 w-3.5" />
             </Button>
           )}
-          <Button
-            onClick={onRefreshRequestLogs}
-            variant="ghost"
-            size="sm"
-            className="h-8 gap-1 px-2 text-slate-500 dark:text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400"
-            disabled={requestLogsAvailable === false || requestLogsLoading || requestLogsRefreshing}
-          >
-            刷新
-            <RefreshCw
-              className={cn(
-                "h-3.5 w-3.5",
-                (requestLogsLoading || requestLogsRefreshing) && "animate-spin"
-              )}
-            />
-          </Button>
+          {showRefreshButton ? (
+            <Button
+              onClick={onRefreshRequestLogs}
+              variant="ghost"
+              size="sm"
+              className="h-8 gap-1 px-2 text-slate-500 dark:text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400"
+              disabled={
+                requestLogsAvailable === false || requestLogsLoading || requestLogsRefreshing
+              }
+            >
+              刷新
+              <RefreshCw
+                className={cn(
+                  "h-3.5 w-3.5",
+                  (requestLogsLoading || requestLogsRefreshing) && "animate-spin"
+                )}
+              />
+            </Button>
+          ) : null}
           {showCompactModeToggle ? (
             <div className="flex items-center gap-1.5 pl-1">
               <span className="text-xs text-slate-500 dark:text-slate-400">简洁模式</span>
