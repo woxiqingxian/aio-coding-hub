@@ -289,6 +289,8 @@ const RequestLogCard = memo(function RequestLogCard({
               </span>
             )}
 
+            {log.session_reuse && <SessionReuseBadge showCustomTooltip={showCustomTooltip} />}
+
             {isFree && <FreeBadge />}
 
             {log.error_code && (
@@ -311,7 +313,6 @@ const RequestLogCard = memo(function RequestLogCard({
             ))}
 
             <span className="ml-auto flex w-[150px] shrink-0 items-center justify-end gap-1.5 text-xs text-slate-400 dark:text-slate-500 whitespace-nowrap">
-              {log.session_reuse && <SessionReuseBadge showCustomTooltip={showCustomTooltip} />}
               <Clock className="h-3 w-3 shrink-0" />
               {formatUnixSeconds(log.created_at)}
             </span>

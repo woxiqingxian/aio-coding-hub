@@ -370,6 +370,8 @@ export const RealtimeTraceCards = memo(function RealtimeTraceCards({
                     <span className="truncate">{modelText}</span>
                   </span>
 
+                  {hasSessionReuse && <SessionReuseBadge showCustomTooltip={showCustomTooltip} />}
+
                   {isFree && <FreeBadge />}
 
                   {summaryErrorCode && (
@@ -380,19 +382,13 @@ export const RealtimeTraceCards = memo(function RealtimeTraceCards({
 
                   {!isInProgress ? (
                     <span className="ml-auto flex w-[150px] shrink-0 items-center justify-end gap-1.5 text-xs text-slate-400 dark:text-slate-500 whitespace-nowrap">
-                      {hasSessionReuse && (
-                        <SessionReuseBadge showCustomTooltip={showCustomTooltip} />
-                      )}
                       <Clock className="h-3 w-3 shrink-0" />
                       {formatUnixSeconds(Math.floor(trace.first_seen_ms / 1000))}
                     </span>
                   ) : (
                     <span className="ml-auto flex shrink-0 items-center gap-2 whitespace-nowrap">
-                      {hasSessionReuse && (
-                        <SessionReuseBadge showCustomTooltip={showCustomTooltip} />
-                      )}
                       <span className="inline-flex items-center gap-1.5 text-xs font-mono tabular-nums text-indigo-600 dark:text-indigo-300">
-                        <Clock className="h-3 w-3 shrink-0 text-slate-400 dark:text-slate-500" />
+                        <Clock className="h-3 w-3 shrink-0" />
                         {formatDurationMs(runningMs)}
                       </span>
                     </span>
