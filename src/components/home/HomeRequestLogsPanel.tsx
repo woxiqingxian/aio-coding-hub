@@ -249,7 +249,7 @@ const RequestLogCard = memo(function RequestLogCard({
           <div className={cn("flex items-center gap-2 min-w-0", compactMode ? "" : "mb-1.5")}>
             <span
               className={cn(
-                "inline-flex shrink-0 items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] font-medium",
+                "inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded-md px-1.5 py-0.5 text-[11px] font-medium",
                 statusBadge.tone
               )}
               title={statusBadge.title}
@@ -292,7 +292,7 @@ const RequestLogCard = memo(function RequestLogCard({
             {isFree && <FreeBadge />}
 
             {log.error_code && (
-              <span className="shrink-0 rounded-md bg-amber-50/80 px-2 py-0.5 text-[11px] font-semibold text-amber-600 ring-1 ring-inset ring-amber-500/10 dark:bg-amber-500/15 dark:text-amber-300 dark:ring-amber-400/20">
+              <span className="shrink-0 whitespace-nowrap rounded-md bg-amber-50/80 px-2 py-0.5 text-[11px] font-semibold text-amber-600 ring-1 ring-inset ring-amber-500/10 dark:bg-amber-500/15 dark:text-amber-300 dark:ring-amber-400/20">
                 {getErrorCodeLabel(log.error_code)}
               </span>
             )}
@@ -301,7 +301,7 @@ const RequestLogCard = memo(function RequestLogCard({
               <span
                 key={tag.label}
                 className={cn(
-                  "shrink-0 rounded-md px-2 py-0.5 text-[11px] font-semibold",
+                  "shrink-0 whitespace-nowrap rounded-md px-2 py-0.5 text-[11px] font-semibold",
                   tag.className
                 )}
                 title={tag.title}
