@@ -274,13 +274,14 @@ describe("pages/settings/SettingsMainColumn", () => {
 
     renderSettingsMainColumn();
 
-    const row = screen.getByText("首页个性化布局").parentElement?.parentElement;
+    const row = screen.getByText("首页个性化布局").closest(".min-w-0")?.parentElement;
     expect(row).toBeTruthy();
+    expect(screen.getByText("测试")).toBeInTheDocument();
     fireEvent.click(within(row as HTMLElement).getByRole("switch"));
     expect(window.localStorage.getItem("aio-home-overview-logs-primary-layout")).toBe("true");
   });
 
-  it("disables heatmap and usage toggles when personalized layout is enabled", () => {
+  it("keeps heatmap and usage toggles enabled when personalized layout is enabled", () => {
     vi.mocked(useTheme).mockReturnValue({
       theme: "system",
       resolvedTheme: "light",
@@ -295,9 +296,9 @@ describe("pages/settings/SettingsMainColumn", () => {
     expect(heatmapRow).toBeTruthy();
     expect(usageRow).toBeTruthy();
 
-    expect(within(heatmapRow as HTMLElement).getByRole("switch")).toBeDisabled();
-    expect(within(usageRow as HTMLElement).getByRole("switch")).toBeDisabled();
-    expect(screen.getAllByText("开启首页个性化布局后，此项仅旧布局生效").length).toBe(2);
+    expect(within(heatmapRow as HTMLElement).getByRole("switch")).toBeEnabled();
+    expect(within(usageRow as HTMLElement).getByRole("switch")).toBeEnabled();
+    expect(screen.queryByText("开启首页个性化布局后，此项仅旧布局生效")).not.toBeInTheDocument();
   });
 
   it("reorders CLI priority from settings", () => {

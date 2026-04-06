@@ -466,12 +466,12 @@ export function SettingsMainColumn({
                 </div>
               </SettingsRow>
               <SettingsRow label="首页概览排序">
-                <div className="w-full max-w-md">
+                <div className="w-full sm:w-auto sm:max-w-full">
                   <HomeOverviewTabOrderEditor />
                 </div>
               </SettingsRow>
               <SettingsRow label="CLI 优先顺序">
-                <div className="w-full max-w-md">
+                <div className="w-full sm:w-auto sm:max-w-full">
                   <CliPriorityOrderEditor
                     order={cliPriorityOrder}
                     onChange={(nextOrder) => {
@@ -488,14 +488,14 @@ export function SettingsMainColumn({
                     key: "show_home_heatmap" as const,
                     checked: showHomeHeatmap,
                     setter: setShowHomeHeatmap,
-                    disabled: settingsInputsDisabled || homeOverviewLogsPrimaryLayout,
+                    disabled: settingsInputsDisabled,
                   },
                   {
                     label: "显示首页用量统计",
                     key: "show_home_usage" as const,
                     checked: showHomeUsage,
                     setter: setShowHomeUsage,
-                    disabled: settingsInputsDisabled || homeOverviewLogsPrimaryLayout,
+                    disabled: settingsInputsDisabled,
                   },
                 ] satisfies {
                   label: string;
@@ -505,15 +505,7 @@ export function SettingsMainColumn({
                   disabled: boolean;
                 }[]
               ).map(({ label, key, checked, setter, disabled }) => (
-                <SettingsRow
-                  key={key}
-                  label={label}
-                  subtitle={
-                    homeOverviewLogsPrimaryLayout
-                      ? "开启首页个性化布局后，此项仅旧布局生效"
-                      : undefined
-                  }
-                >
+                <SettingsRow key={key} label={label}>
                   <Switch
                     checked={checked}
                     onCheckedChange={(next) => {
@@ -524,7 +516,16 @@ export function SettingsMainColumn({
                   />
                 </SettingsRow>
               ))}
-              <SettingsRow label="首页个性化布局">
+              <SettingsRow
+                label={
+                  <span className="inline-flex items-center gap-2">
+                    <span>首页个性化布局</span>
+                    <span className="inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-medium text-amber-700 dark:bg-amber-500/15 dark:text-amber-300">
+                      测试
+                    </span>
+                  </span>
+                }
+              >
                 <Switch
                   checked={homeOverviewLogsPrimaryLayout}
                   onCheckedChange={(next) => {
