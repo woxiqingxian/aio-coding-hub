@@ -2,20 +2,52 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
+import type { CliSessionsFolderLookupEntry } from "../../../services/cliSessions";
 import type { RequestLogSummary } from "../../../services/requestLogs";
 import type { TraceSession } from "../../../services/traceStore";
 import { HomeRequestLogsPanel } from "../HomeRequestLogsPanel";
+
+const { useCliSessionsFolderLookupByIdsQueryMock } = vi.hoisted(() => ({
+  useCliSessionsFolderLookupByIdsQueryMock: vi.fn<
+    () => { data: CliSessionsFolderLookupEntry[]; isLoading: boolean }
+  >(() => ({ data: [], isLoading: false })),
+}));
+
+vi.mock("../../../query/cliSessions", () => ({
+  useCliSessionsFolderLookupByIdsQuery: useCliSessionsFolderLookupByIdsQueryMock,
+}));
 
 describe("components/home/HomeRequestLogsPanel", () => {
   afterEach(() => {
     localStorage.removeItem("home_request_logs_compact");
     vi.useRealTimers();
+    useCliSessionsFolderLookupByIdsQueryMock.mockReset();
+    useCliSessionsFolderLookupByIdsQueryMock.mockReturnValue({ data: [], isLoading: false });
   });
   it("renders traces + logs and supports refresh/select", () => {
+    useCliSessionsFolderLookupByIdsQueryMock.mockReturnValue({
+      data: [
+        {
+          source: "claude",
+          session_id: "claude-live-session",
+          folder_name: "workspace-live",
+          folder_path: "/Users/demo/workspace-live",
+        },
+        {
+          source: "claude",
+          session_id: "claude-log-session",
+          folder_name: "workspace-log",
+          folder_path: "/Users/demo/workspace-log",
+        },
+      ],
+      isLoading: false,
+    });
+
     const traces: TraceSession[] = [
       {
         trace_id: "t-live",
         cli_key: "claude",
+        session_id: "claude-live-session",
         method: "POST",
         path: "/v1/messages",
         query: null,
@@ -48,6 +80,7 @@ describe("components/home/HomeRequestLogsPanel", () => {
         id: 1,
         trace_id: "t1",
         cli_key: "claude",
+        session_id: "claude-log-session",
         method: "POST",
         path: "/v1/messages",
         requested_model: "claude-3-opus",
@@ -108,6 +141,8 @@ describe("components/home/HomeRequestLogsPanel", () => {
 
     expect(screen.getByText("最近代理记录")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /claude-3-opus.*P1/ })).toBeInTheDocument();
+    expect(screen.getByText("workspace-live")).toBeInTheDocument();
+    expect(screen.getByText("workspace-log")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("switch", { name: "最近使用记录简洁模式" }));
     expect(screen.getByRole("button", { name: /claude-3-opus.*P1/ })).toBeInTheDocument();
     expect(screen.getByText("$0.123456")).toBeInTheDocument();
@@ -201,6 +236,106 @@ describe("components/home/HomeRequestLogsPanel", () => {
     expect(screen.getAllByText("claude-3-opus")).toHaveLength(1);
     expect(screen.getByText("gpt-5")).toBeInTheDocument();
     expect(screen.getAllByText("进行中")).toHaveLength(2);
+  });
+
+  it("hides folder labels for unsupported cli keys and missing session ids", () => {
+    useCliSessionsFolderLookupByIdsQueryMock.mockReturnValue({
+      data: [
+        {
+          source: "codex",
+          session_id: "codex-session-1",
+          folder_name: "platform-core",
+          folder_path: "/Users/demo/platform-core",
+        },
+      ],
+      isLoading: false,
+    });
+
+    const requestLogs: RequestLogSummary[] = [
+      {
+        id: 21,
+        trace_id: "t-folder-codex",
+        cli_key: "codex",
+        session_id: "codex-session-1",
+        method: "POST",
+        path: "/v1/responses",
+        requested_model: "gpt-5.4",
+        status: 200,
+        error_code: null,
+        duration_ms: 800,
+        ttfb_ms: 100,
+        attempt_count: 1,
+        has_failover: false,
+        start_provider_id: 1,
+        start_provider_name: "P1",
+        final_provider_id: 1,
+        final_provider_name: "P1",
+        route: [],
+        session_reuse: false,
+        input_tokens: null,
+        output_tokens: null,
+        total_tokens: null,
+        cache_read_input_tokens: null,
+        cache_creation_input_tokens: null,
+        cache_creation_5m_input_tokens: null,
+        cache_creation_1h_input_tokens: null,
+        cost_usd: null,
+        cost_multiplier: 1,
+        created_at_ms: null,
+        created_at: Math.floor(Date.now() / 1000),
+      },
+      {
+        id: 22,
+        trace_id: "t-folder-gemini",
+        cli_key: "gemini",
+        session_id: "gemini-session-1",
+        method: "POST",
+        path: "/v1/chat/completions",
+        requested_model: "gemini-2.5-pro",
+        status: 200,
+        error_code: null,
+        duration_ms: 900,
+        ttfb_ms: 120,
+        attempt_count: 1,
+        has_failover: false,
+        start_provider_id: 1,
+        start_provider_name: "P2",
+        final_provider_id: 1,
+        final_provider_name: "P2",
+        route: [],
+        session_reuse: false,
+        input_tokens: null,
+        output_tokens: null,
+        total_tokens: null,
+        cache_read_input_tokens: null,
+        cache_creation_input_tokens: null,
+        cache_creation_5m_input_tokens: null,
+        cache_creation_1h_input_tokens: null,
+        cost_usd: null,
+        cost_multiplier: 1,
+        created_at_ms: null,
+        created_at: Math.floor(Date.now() / 1000),
+      },
+    ];
+
+    render(
+      <MemoryRouter>
+        <HomeRequestLogsPanel
+          showCustomTooltip={true}
+          traces={[]}
+          requestLogs={requestLogs}
+          requestLogsLoading={false}
+          requestLogsRefreshing={false}
+          requestLogsAvailable={true}
+          onRefreshRequestLogs={vi.fn()}
+          selectedLogId={null}
+          onSelectLogId={vi.fn()}
+        />
+      </MemoryRouter>
+    );
+
+    expect(screen.getByText("platform-core")).toBeInTheDocument();
+    expect(screen.queryByText("gemini-session-1")).not.toBeInTheDocument();
   });
 
   it("renders persisted in-progress request logs as ongoing rows", () => {

@@ -1,4 +1,4 @@
-import type { KeyboardEvent as ReactKeyboardEvent } from "react";
+import { useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import type { GatewayAvailability } from "../../hooks/useGatewayMeta";
@@ -6,6 +6,10 @@ import { gatewayKeys } from "../../query/keys";
 import { useTheme } from "../../hooks/useTheme";
 import { logToConsole } from "../../services/consoleLog";
 import { gatewayStart, gatewayStop, type GatewayStatus } from "../../services/gateway";
+import {
+  readHomeOverviewLogsPrimaryLayoutFromStorage,
+  writeHomeOverviewLogsPrimaryLayoutToStorage,
+} from "../../services/homeOverviewLayout";
 import type { HomeUsagePeriod } from "../../services/settings";
 import { Button } from "../../ui/Button";
 import { Card } from "../../ui/Card";
@@ -125,6 +129,9 @@ export function SettingsMainColumn({
 }: SettingsMainColumnProps) {
   const { theme, setTheme } = useTheme();
   const queryClient = useQueryClient();
+  const [homeOverviewLogsPrimaryLayout, setHomeOverviewLogsPrimaryLayout] = useState(() =>
+    readHomeOverviewLogsPrimaryLayoutFromStorage()
+  );
   const settingsInputsDisabled = !settingsReady || settingsWriteBlocked || settingsSaving;
   const gatewayRestartDisabled =
     gatewayAvailable !== "available" || settingsWriteBlocked || settingsSaving;
@@ -481,14 +488,14 @@ export function SettingsMainColumn({
                     key: "show_home_heatmap" as const,
                     checked: showHomeHeatmap,
                     setter: setShowHomeHeatmap,
-                    disabled: settingsInputsDisabled,
+                    disabled: settingsInputsDisabled || homeOverviewLogsPrimaryLayout,
                   },
                   {
                     label: "显示首页用量统计",
                     key: "show_home_usage" as const,
                     checked: showHomeUsage,
                     setter: setShowHomeUsage,
-                    disabled: settingsInputsDisabled,
+                    disabled: settingsInputsDisabled || homeOverviewLogsPrimaryLayout,
                   },
                 ] satisfies {
                   label: string;
@@ -498,7 +505,15 @@ export function SettingsMainColumn({
                   disabled: boolean;
                 }[]
               ).map(({ label, key, checked, setter, disabled }) => (
-                <SettingsRow key={key} label={label}>
+                <SettingsRow
+                  key={key}
+                  label={label}
+                  subtitle={
+                    homeOverviewLogsPrimaryLayout
+                      ? "开启首页个性化布局后，此项仅旧布局生效"
+                      : undefined
+                  }
+                >
                   <Switch
                     checked={checked}
                     onCheckedChange={(next) => {
@@ -509,6 +524,15 @@ export function SettingsMainColumn({
                   />
                 </SettingsRow>
               ))}
+              <SettingsRow label="首页个性化布局">
+                <Switch
+                  checked={homeOverviewLogsPrimaryLayout}
+                  onCheckedChange={(next) => {
+                    setHomeOverviewLogsPrimaryLayout(next);
+                    writeHomeOverviewLogsPrimaryLayoutToStorage(next);
+                  }}
+                />
+              </SettingsRow>
             </div>
           </div>
         </div>

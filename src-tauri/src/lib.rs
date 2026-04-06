@@ -419,6 +419,7 @@ pub fn run() {
             request_log_get,
             request_log_get_by_trace_id,
             request_attempt_logs_by_trace_id,
+            cli_sessions_folder_lookup_by_ids,
             // ── data_management ──
             db_disk_usage_get,
             request_logs_clear_all,

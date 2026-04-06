@@ -251,6 +251,8 @@ export const cliSessionsKeys = {
     [...cliSessionsAllKey, "projects", source, wslDistro ?? null] as const,
   sessionsList: (source: CliSessionsSource, projectId: string, wslDistro?: string) =>
     [...cliSessionsAllKey, "sessions", source, projectId, wslDistro ?? null] as const,
+  folderLookup: (keys: string[], wslDistro?: string) =>
+    [...cliSessionsAllKey, "folderLookup", ...normalizeKeyParts(keys), wslDistro ?? null] as const,
   messages: (source: CliSessionsSource, filePath: string, fromEnd = true, wslDistro?: string) =>
     [...cliSessionsAllKey, "messages", source, filePath, fromEnd, wslDistro ?? null] as const,
 };

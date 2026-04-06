@@ -5,6 +5,7 @@ export type RequestLogSummary = {
   id: number;
   trace_id: string;
   cli_key: CliKey;
+  session_id?: string | null;
   method: string;
   path: string;
   excluded_from_stats?: boolean;
@@ -54,6 +55,7 @@ export type RequestLogDetail = {
   id: number;
   trace_id: string;
   cli_key: CliKey;
+  session_id?: string | null;
   method: string;
   path: string;
   query: string | null;

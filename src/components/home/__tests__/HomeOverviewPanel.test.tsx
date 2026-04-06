@@ -399,6 +399,45 @@ describe("components/home/HomeOverviewPanel", () => {
     expect(screen.getByText("work-status-card:vertical")).toBeInTheDocument();
   });
 
+  it("uses the legacy overview layout by default", () => {
+    renderPanel();
+
+    const requestLogs = screen.getByText("request-logs");
+    const overviewTab = screen.getByRole("tab", { name: "配置信息" });
+
+    expect(
+      overviewTab.compareDocumentPosition(requestLogs) & Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy();
+  });
+
+  it("uses the logs-primary layout when the local preference is enabled", () => {
+    window.localStorage.setItem("aio-home-overview-logs-primary-layout", "true");
+
+    renderPanel();
+
+    const requestLogs = screen.getByText("request-logs");
+    const usageSection = screen.getByText("usage-section:false:true");
+
+    expect(
+      usageSection.compareDocumentPosition(requestLogs) & Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy();
+    expect(screen.getAllByText("work-status-card:vertical")).toHaveLength(1);
+    expect(screen.getByRole("tab", { name: "配置信息" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "熔断信息" })).toBeInTheDocument();
+  });
+
+  it("uses proxy-left and usage-plus-logs-right in logs-primary layout", () => {
+    window.localStorage.setItem("aio-home-overview-logs-primary-layout", "true");
+
+    renderPanel({ showHomeHeatmap: true, showHomeUsage: false });
+
+    expect(screen.getByText("usage-section:false:true")).toBeInTheDocument();
+    expect(screen.getAllByText("work-status-card:vertical")).toHaveLength(1);
+    expect(screen.queryByText("work-status-card:horizontal")).not.toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "配置信息" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "熔断信息" })).toBeInTheDocument();
+  });
+
   it("renders preview active sessions when dev preview is enabled and there are no real sessions", async () => {
     renderPanel({ devPreviewEnabled: true, activeSessions: [] });
 

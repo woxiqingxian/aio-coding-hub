@@ -14,6 +14,7 @@ export type TraceSummary = GatewayRequestEvent & {
 export type TraceSession = {
   trace_id: string;
   cli_key: string;
+  session_id?: string | null;
   method: string;
   path: string;
   query: string | null;

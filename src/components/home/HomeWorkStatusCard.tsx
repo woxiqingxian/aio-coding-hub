@@ -11,6 +11,7 @@ import { CliBrandIcon } from "./CliBrandIcon";
 
 export type HomeWorkStatusCardProps = {
   layout?: "vertical" | "horizontal";
+  chrome?: "card" | "plain";
   cliProxyLoading: boolean;
   cliProxyAvailable: boolean | null;
 
@@ -22,6 +23,7 @@ export type HomeWorkStatusCardProps = {
 
 export function HomeWorkStatusCard({
   layout = "vertical",
+  chrome = "card",
   cliProxyLoading,
   cliProxyAvailable,
   cliProxyEnabled,
@@ -30,9 +32,10 @@ export function HomeWorkStatusCard({
   onSetCliProxyEnabled,
 }: HomeWorkStatusCardProps) {
   const horizontal = layout === "horizontal";
+  const plain = chrome === "plain";
 
-  return (
-    <Card padding="sm" className="flex h-full flex-1 flex-col">
+  const content = (
+    <>
       <div className="flex items-center justify-between gap-2">
         <div className="text-sm font-semibold">代理状态</div>
       </div>
@@ -110,6 +113,16 @@ export function HomeWorkStatusCard({
           })}
         </div>
       )}
+    </>
+  );
+
+  if (plain) {
+    return <div className="flex h-full flex-1 flex-col">{content}</div>;
+  }
+
+  return (
+    <Card padding="sm" className="flex h-full flex-1 flex-col">
+      {content}
     </Card>
   );
 }

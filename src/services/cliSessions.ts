@@ -30,6 +30,18 @@ export type CliSessionsSessionSummary = {
   wsl_distro: string | null;
 };
 
+export type CliSessionsFolderLookupInput = {
+  source: CliSessionsSource;
+  session_id: string;
+};
+
+export type CliSessionsFolderLookupEntry = {
+  source: CliSessionsSource;
+  session_id: string;
+  folder_name: string;
+  folder_path: string;
+};
+
 export type CliSessionsDisplayContentBlock =
   | { type: "text"; text: string }
   | { type: "thinking"; thinking: string }
@@ -114,6 +126,20 @@ export async function cliSessionsSessionDelete(input: {
     filePaths: input.file_paths,
     wslDistro: input.wsl_distro ?? null,
   });
+}
+
+export async function cliSessionsFolderLookupByIds(
+  items: CliSessionsFolderLookupInput[],
+  wslDistro?: string
+) {
+  return invokeService<CliSessionsFolderLookupEntry[]>(
+    "读取会话文件夹信息失败",
+    "cli_sessions_folder_lookup_by_ids",
+    {
+      items,
+      wslDistro: wslDistro ?? null,
+    }
+  );
 }
 
 /**

@@ -7,6 +7,7 @@ import type { CliKey } from "../../services/providers";
 import type { RequestLogRouteHop } from "../../services/requestLogs";
 import type { TraceSession } from "../../services/traceStore";
 import { Tooltip } from "../../ui/Tooltip";
+import { FolderOpen } from "lucide-react";
 import { RouteTooltipContent } from "./RouteTooltipContent";
 
 const CLIENT_ABORT_ERROR_CODES: ReadonlySet<string> = new Set([
@@ -205,6 +206,26 @@ export function FreeBadge() {
   return (
     <span className="inline-flex shrink-0 items-center whitespace-nowrap rounded-md bg-emerald-50/80 px-2 py-0.5 text-[11px] font-semibold text-emerald-600 ring-1 ring-inset ring-emerald-500/10 dark:bg-emerald-500/15 dark:text-emerald-300 dark:ring-emerald-400/20">
       免费
+    </span>
+  );
+}
+
+export function FolderBadge({
+  folderName,
+  folderPath,
+  allowWrap = false,
+}: {
+  folderName: string;
+  folderPath: string;
+  allowWrap?: boolean;
+}) {
+  return (
+    <span
+      className="inline-flex min-w-0 items-center gap-1 rounded-md bg-slate-100/75 px-2 py-0.5 text-[11px] font-medium text-slate-600 dark:bg-slate-700/55 dark:text-slate-200"
+      title={folderPath}
+    >
+      <FolderOpen className="h-3 w-3 shrink-0 text-slate-400 dark:text-slate-500" />
+      <span className={allowWrap ? "whitespace-normal break-all" : "truncate"}>{folderName}</span>
     </span>
   );
 }

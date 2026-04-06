@@ -6,10 +6,13 @@ import {
   useQueryClient,
 } from "@tanstack/react-query";
 import {
+  cliSessionsFolderLookupByIds,
   cliSessionsMessagesGet,
   cliSessionsProjectsList,
   cliSessionsSessionDelete,
   cliSessionsSessionsList,
+  type CliSessionsFolderLookupEntry,
+  type CliSessionsFolderLookupInput,
   type CliSessionsSessionSummary,
   type CliSessionsSource,
 } from "../services/cliSessions";
@@ -35,6 +38,19 @@ export function useCliSessionsSessionsListQuery(
     queryFn: () => cliSessionsSessionsList(source, projectId, wslDistro),
     enabled: Boolean(projectId.trim()) && (options?.enabled ?? true),
     placeholderData: keepPreviousData,
+  });
+}
+
+export function useCliSessionsFolderLookupByIdsQuery(
+  items: CliSessionsFolderLookupInput[],
+  options?: { enabled?: boolean; wslDistro?: string }
+) {
+  const wslDistro = options?.wslDistro;
+  const lookupKeys = items.map((item) => `${item.source}:${item.session_id}`);
+  return useQuery<CliSessionsFolderLookupEntry[]>({
+    queryKey: cliSessionsKeys.folderLookup(lookupKeys, wslDistro),
+    queryFn: async () => (await cliSessionsFolderLookupByIds(items, wslDistro)) ?? [],
+    enabled: items.length > 0 && (options?.enabled ?? true),
   });
 }
 

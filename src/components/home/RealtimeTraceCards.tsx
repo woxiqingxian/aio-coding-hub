@@ -5,6 +5,7 @@
 import { memo, useEffect, useMemo, useState } from "react";
 import { cliBadgeToneStatic, cliShortLabel } from "../../constants/clis";
 import { GatewayErrorCodes } from "../../constants/gatewayErrorCodes";
+import type { CliSessionsFolderLookupEntry } from "../../services/cliSessions";
 import type { CliKey } from "../../services/providers";
 import type { TraceSession } from "../../services/traceStore";
 import { cn } from "../../utils/cn";
@@ -21,6 +22,7 @@ import { Clock, Server, Loader2, CheckCircle2, XCircle } from "lucide-react";
 import {
   computeEffectiveInputTokens,
   computeStatusBadge,
+  FolderBadge,
   FreeBadge,
   getErrorCodeLabel,
   SessionReuseBadge,
@@ -28,10 +30,17 @@ import {
 import { CliBrandIcon } from "./CliBrandIcon";
 
 export type RealtimeTraceCardsProps = {
+  folderLookupBySessionKey: Map<string, CliSessionsFolderLookupEntry>;
   traces: TraceSession[];
   formatUnixSeconds: (ts: number) => string;
   showCustomTooltip: boolean;
 };
+
+function sessionFolderLookupKey(cliKey: string, sessionId: string | null | undefined) {
+  const normalized = sessionId?.trim();
+  if (!normalized) return null;
+  return `${cliKey}:${normalized}`;
+}
 
 const REALTIME_TRACE_EXIT_START_MS = 600;
 const REALTIME_TRACE_EXIT_ANIM_MS = 400;
@@ -51,6 +60,7 @@ const STALE_TRACE_TIMEOUT_MS = 5 * 60 * 1000;
 const BATCH_EXIT_WINDOW_MS = 500;
 
 export const RealtimeTraceCards = memo(function RealtimeTraceCards({
+  folderLookupBySessionKey,
   traces,
   formatUnixSeconds,
   showCustomTooltip,
@@ -201,6 +211,10 @@ export const RealtimeTraceCards = memo(function RealtimeTraceCards({
           .sort((a, b) => b.attempt_index - a.attempt_index)[0];
 
         const providerText = attemptRoute.providerText;
+        const sessionFolder = (() => {
+          const key = sessionFolderLookupKey(trace.cli_key, trace.session_id);
+          return key ? (folderLookupBySessionKey.get(key) ?? null) : null;
+        })();
 
         const routeSummary = (() => {
           if (!attemptRoute.startProvider && !attemptRoute.endProvider) return "—";
@@ -369,6 +383,13 @@ export const RealtimeTraceCards = memo(function RealtimeTraceCards({
                     <span className="shrink-0">{cliLabel} /</span>
                     <span className="truncate">{modelText}</span>
                   </span>
+
+                  {sessionFolder && (
+                    <FolderBadge
+                      folderName={sessionFolder.folder_name}
+                      folderPath={sessionFolder.folder_path}
+                    />
+                  )}
 
                   {hasSessionReuse && <SessionReuseBadge showCustomTooltip={showCustomTooltip} />}
 

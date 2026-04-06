@@ -33,6 +33,14 @@ pub struct CliSessionsSessionSummary {
 }
 
 #[derive(Debug, Clone, Serialize)]
+pub struct CliSessionsFolderLookupEntry {
+    pub source: String,
+    pub session_id: String,
+    pub folder_name: String,
+    pub folder_path: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
 pub struct CliSessionsPaginatedMessages {
     pub messages: Vec<CliSessionsDisplayMessage>,
     pub total: usize,

@@ -7,6 +7,12 @@ import { useNavigate } from "react-router-dom";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { cliBadgeToneStatic, cliShortLabel } from "../../constants/clis";
 import { useNowMs } from "../../hooks/useNowMs";
+import { useCliSessionsFolderLookupByIdsQuery } from "../../query/cliSessions";
+import type {
+  CliSessionsFolderLookupEntry,
+  CliSessionsFolderLookupInput,
+  CliSessionsSource,
+} from "../../services/cliSessions";
 import type { RequestLogSummary } from "../../services/requestLogs";
 import type { TraceSession } from "../../services/traceStore";
 import { Button } from "../../ui/Button";
@@ -31,6 +37,7 @@ import {
   buildRequestRouteMeta,
   computeEffectiveInputTokens,
   computeStatusBadge,
+  FolderBadge,
   FreeBadge,
   getErrorCodeLabel,
   isPersistedRequestLogInProgress,
@@ -49,7 +56,11 @@ import {
 } from "lucide-react";
 import { RealtimeTraceCards } from "./RealtimeTraceCards";
 import { CliBrandIcon } from "./CliBrandIcon";
-import { buildPreviewRequestLogs, buildPreviewTraces } from "./previewData";
+import {
+  buildPreviewRequestLogs,
+  buildPreviewSessionFolderLookups,
+  buildPreviewTraces,
+} from "./previewData";
 
 // Estimated height for each request log card (px): padding + 2 rows of content + margin
 const ESTIMATED_LOG_CARD_HEIGHT = 90;
@@ -60,6 +71,16 @@ const VIRTUALIZATION_THRESHOLD = 30;
 
 // Module-level stable reference: pure function, no need to recreate per render.
 const formatUnixSecondsStable = (ts: number) => formatRelativeTimeFromUnixSeconds(ts);
+
+function isFolderLookupCliKey(cliKey: string): cliKey is CliSessionsSource {
+  return cliKey === "claude" || cliKey === "codex";
+}
+
+function sessionFolderLookupKey(cliKey: string, sessionId: string | null | undefined) {
+  const normalized = sessionId?.trim();
+  if (!normalized) return null;
+  return `${cliKey}:${normalized}`;
+}
 
 function requestLogCreatedAtMs(log: RequestLogSummary) {
   const ms = log.created_at_ms ?? 0;
@@ -114,6 +135,7 @@ function mergeTraceWithRequestLog(
 
   return {
     ...trace,
+    session_id: trace.session_id ?? requestLog.session_id ?? null,
     requested_model: trace.requested_model ?? requestLog.requested_model ?? null,
     summary: mergedSummary,
     last_seen_ms: Math.max(trace.last_seen_ms, requestLogCreatedAtMs(requestLog)),
@@ -126,6 +148,7 @@ type RequestLogCardProps = {
   liveTrace?: TraceSession;
   nowMs: number;
   isSelected: boolean;
+  sessionFolder?: CliSessionsFolderLookupEntry | null;
   showCustomTooltip: boolean;
   onSelectLogId: (id: number | null) => void;
   formatUnixSeconds: (ts: number) => string;
@@ -137,6 +160,7 @@ const RequestLogCard = memo(function RequestLogCard({
   liveTrace,
   nowMs,
   isSelected,
+  sessionFolder,
   showCustomTooltip,
   onSelectLogId,
   formatUnixSeconds,
@@ -179,6 +203,7 @@ const RequestLogCard = memo(function RequestLogCard({
 
   const cliLabel = cliShortLabel(log.cli_key);
   const cliTone = cliBadgeToneStatic(log.cli_key);
+  const compactTextClass = compactMode ? "whitespace-normal break-all" : "truncate";
 
   const ttfbMs = sanitizeTtfbMs(log.ttfb_ms, displayDurationMs);
   const outputTokensPerSecond = computeOutputTokensPerSecond(
@@ -246,73 +271,99 @@ const RequestLogCard = memo(function RequestLogCard({
         />
 
         <div className={cn("px-3", compactMode ? "py-2" : "py-2.5")}>
-          <div className={cn("flex items-center gap-2 min-w-0", compactMode ? "" : "mb-1.5")}>
-            <span
-              className={cn(
-                "inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded-md px-1.5 py-0.5 text-[11px] font-medium",
-                statusBadge.tone
-              )}
-              title={statusBadge.title}
-            >
-              {isInProgress ? (
-                <Loader2 className="h-3 w-3 shrink-0 animate-spin" />
-              ) : statusBadge.isError ? (
-                <XCircle className="h-3 w-3 shrink-0" />
-              ) : (
-                <CheckCircle2 className="h-3 w-3 shrink-0" />
-              )}
-              <span className="flex-1 text-center truncate">{statusBadge.text}</span>
-            </span>
-
-            <span
-              className={cn(
-                "inline-flex min-w-0 items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] font-medium",
-                cliTone
-              )}
-              title={`${cliLabel} / ${modelText}`}
-            >
-              <CliBrandIcon
-                cliKey={log.cli_key}
-                className="h-2.5 w-2.5 shrink-0 rounded-[3px] object-contain"
-              />
-              <span className="shrink-0">{cliLabel} /</span>
-              <span className="truncate">{modelText}</span>
-            </span>
-
-            {compactMode && (
-              <span
-                className="inline-flex min-w-0 items-center gap-1 rounded-md bg-slate-100/75 px-2 py-0.5 text-[11px] font-medium text-slate-600 dark:bg-slate-700/55 dark:text-slate-200"
-                title={providerTitle}
-              >
-                <Server className="h-3 w-3 shrink-0 text-slate-400 dark:text-slate-500" />
-                <span className="truncate">{providerText}</span>
-              </span>
+          <div
+            className={cn(
+              compactMode
+                ? "grid grid-cols-[minmax(0,1fr)_auto] items-start gap-x-2 gap-y-1"
+                : "flex items-center gap-2 min-w-0 mb-1.5"
             )}
-
-            {log.session_reuse && <SessionReuseBadge showCustomTooltip={showCustomTooltip} />}
-
-            {isFree && <FreeBadge />}
-
-            {log.error_code && (
-              <span className="shrink-0 whitespace-nowrap rounded-md bg-amber-50/80 px-2 py-0.5 text-[11px] font-semibold text-amber-600 ring-1 ring-inset ring-amber-500/10 dark:bg-amber-500/15 dark:text-amber-300 dark:ring-amber-400/20">
-                {getErrorCodeLabel(log.error_code)}
-              </span>
-            )}
-
-            {auditMeta.tags.map((tag) => (
+          >
+            <div
+              className={cn(
+                "min-w-0",
+                compactMode ? "flex flex-wrap items-start gap-2" : "contents"
+              )}
+            >
               <span
-                key={tag.label}
                 className={cn(
-                  "shrink-0 whitespace-nowrap rounded-md px-2 py-0.5 text-[11px] font-semibold",
-                  tag.className
+                  "inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded-md px-1.5 py-0.5 text-[11px] font-medium",
+                  statusBadge.tone
                 )}
-                title={tag.title}
+                title={statusBadge.title}
               >
-                {tag.label}
+                {isInProgress ? (
+                  <Loader2 className="h-3 w-3 shrink-0 animate-spin" />
+                ) : statusBadge.isError ? (
+                  <XCircle className="h-3 w-3 shrink-0" />
+                ) : (
+                  <CheckCircle2 className="h-3 w-3 shrink-0" />
+                )}
+                <span className="flex-1 text-center">{statusBadge.text}</span>
               </span>
-            ))}
 
-            <span className="ml-auto flex w-[150px] shrink-0 items-center justify-end gap-1.5 text-xs text-slate-400 dark:text-slate-500 whitespace-nowrap">
+              <span
+                className={cn(
+                  "inline-flex min-w-0 items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] font-medium",
+                  cliTone
+                )}
+                title={`${cliLabel} / ${modelText}`}
+              >
+                <CliBrandIcon
+                  cliKey={log.cli_key}
+                  className="h-2.5 w-2.5 shrink-0 rounded-[3px] object-contain"
+                />
+                <span className="shrink-0">{cliLabel} /</span>
+                <span className={compactTextClass}>{modelText}</span>
+              </span>
+
+              {sessionFolder && (
+                <FolderBadge
+                  folderName={sessionFolder.folder_name}
+                  folderPath={sessionFolder.folder_path}
+                  allowWrap={compactMode}
+                />
+              )}
+
+              {compactMode && (
+                <span
+                  className="inline-flex min-w-0 items-center gap-1 rounded-md bg-slate-100/75 px-2 py-0.5 text-[11px] font-medium text-slate-600 dark:bg-slate-700/55 dark:text-slate-200"
+                  title={providerTitle}
+                >
+                  <Server className="h-3 w-3 shrink-0 text-slate-400 dark:text-slate-500" />
+                  <span className={compactTextClass}>{providerText}</span>
+                </span>
+              )}
+
+              {log.session_reuse && <SessionReuseBadge showCustomTooltip={showCustomTooltip} />}
+
+              {isFree && <FreeBadge />}
+
+              {log.error_code && (
+                <span className="shrink-0 whitespace-nowrap rounded-md bg-amber-50/80 px-2 py-0.5 text-[11px] font-semibold text-amber-600 ring-1 ring-inset ring-amber-500/10 dark:bg-amber-500/15 dark:text-amber-300 dark:ring-amber-400/20">
+                  {getErrorCodeLabel(log.error_code)}
+                </span>
+              )}
+
+              {auditMeta.tags.map((tag) => (
+                <span
+                  key={tag.label}
+                  className={cn(
+                    "shrink-0 whitespace-nowrap rounded-md px-2 py-0.5 text-[11px] font-semibold",
+                    tag.className
+                  )}
+                  title={tag.title}
+                >
+                  {tag.label}
+                </span>
+              ))}
+            </div>
+
+            <span
+              className={cn(
+                "flex shrink-0 items-center gap-1.5 text-xs text-slate-400 dark:text-slate-500 whitespace-nowrap",
+                compactMode ? "self-start" : "ml-auto w-[150px] justify-end"
+              )}
+            >
               <Clock className="h-3 w-3 shrink-0" />
               {formatUnixSeconds(log.created_at)}
             </span>
@@ -525,6 +576,10 @@ export function HomeRequestLogsPanel({
     () => (devPreviewEnabled && requestLogs.length === 0 ? buildPreviewRequestLogs() : []),
     [devPreviewEnabled, requestLogs.length]
   );
+  const previewSessionFolderLookups = useMemo(
+    () => (devPreviewEnabled ? buildPreviewSessionFolderLookups() : []),
+    [devPreviewEnabled]
+  );
   const displayedTraces = traces.length > 0 ? traces : previewTraces;
   const displayedRequestLogs = requestLogs.length > 0 ? requestLogs : previewRequestLogs;
   const sortedRequestLogs = useMemo(() => {
@@ -564,6 +619,44 @@ export function HomeRequestLogsPanel({
       .sort((a, b) => b.first_seen_ms - a.first_seen_ms)
       .slice(0, 20);
   }, [displayedTraces, sortedRequestLogs]);
+  const sessionFolderLookupItems = useMemo(() => {
+    const seen = new Set<string>();
+    const out: CliSessionsFolderLookupInput[] = [];
+
+    const pushIfNeeded = (cliKey: string, sessionId: string | null | undefined) => {
+      if (!isFolderLookupCliKey(cliKey)) return;
+      const normalized = sessionId?.trim();
+      if (!normalized) return;
+      const key = `${cliKey}:${normalized}`;
+      if (seen.has(key)) return;
+      seen.add(key);
+      out.push({ source: cliKey, session_id: normalized });
+    };
+
+    for (const log of sortedRequestLogs) {
+      pushIfNeeded(log.cli_key, log.session_id);
+    }
+    for (const trace of realtimeTraceCandidates) {
+      pushIfNeeded(trace.cli_key, trace.session_id);
+    }
+
+    return out;
+  }, [realtimeTraceCandidates, sortedRequestLogs]);
+  const sessionFolderLookupQuery = useCliSessionsFolderLookupByIdsQuery(sessionFolderLookupItems);
+  const sessionFolderLookupBySessionKey = useMemo(() => {
+    const map = new Map<string, CliSessionsFolderLookupEntry>();
+    for (const item of sessionFolderLookupQuery.data ?? []) {
+      const key = sessionFolderLookupKey(item.source, item.session_id);
+      if (!key) continue;
+      map.set(key, item);
+    }
+    for (const item of previewSessionFolderLookups) {
+      const key = sessionFolderLookupKey(item.source, item.session_id);
+      if (!key || map.has(key)) continue;
+      map.set(key, item);
+    }
+    return map;
+  }, [previewSessionFolderLookups, sessionFolderLookupQuery.data]);
   const tracesByTraceId = useMemo(() => {
     const map = new Map<string, TraceSession>();
     for (const trace of displayedTraces) {
@@ -642,6 +735,7 @@ export function HomeRequestLogsPanel({
           formatUnixSeconds={formatUnixSecondsStable}
           showCustomTooltip={showCustomTooltip}
           compactMode={effectiveCompactMode}
+          folderLookupBySessionKey={sessionFolderLookupBySessionKey}
           tracesByTraceId={tracesByTraceId}
           nowMs={nowMs}
           requestLogsAvailable={requestLogsAvailable}
@@ -662,6 +756,7 @@ type RequestLogsListProps = {
   formatUnixSeconds: (ts: number) => string;
   showCustomTooltip: boolean;
   compactMode: boolean;
+  folderLookupBySessionKey: Map<string, CliSessionsFolderLookupEntry>;
   tracesByTraceId: Map<string, TraceSession>;
   nowMs: number;
   requestLogsAvailable: boolean | null;
@@ -677,6 +772,7 @@ const RequestLogsList = memo(function RequestLogsList({
   formatUnixSeconds,
   showCustomTooltip,
   compactMode,
+  folderLookupBySessionKey,
   tracesByTraceId,
   nowMs,
   requestLogsAvailable,
@@ -705,6 +801,10 @@ const RequestLogsList = memo(function RequestLogsList({
       {requestLogs.map((log) => {
         const trace = tracesByTraceId.get(log.trace_id);
         const liveNow = trace && isPersistedRequestLogInProgress(log) ? nowMs : 0;
+        const sessionFolder = (() => {
+          const key = sessionFolderLookupKey(log.cli_key, log.session_id ?? trace?.session_id);
+          return key ? (folderLookupBySessionKey.get(key) ?? null) : null;
+        })();
         return (
           <RequestLogCard
             compactMode={compactMode}
@@ -713,6 +813,7 @@ const RequestLogsList = memo(function RequestLogsList({
             liveTrace={trace}
             nowMs={liveNow}
             isSelected={selectedLogId === log.id}
+            sessionFolder={sessionFolder}
             showCustomTooltip={showCustomTooltip}
             onSelectLogId={onSelectLogId}
             formatUnixSeconds={formatUnixSeconds}
@@ -728,6 +829,7 @@ const RequestLogsList = memo(function RequestLogsList({
           preventing layout shifts when multiple traces collapse simultaneously. */}
       <div className="will-change-[height]">
         <RealtimeTraceCards
+          folderLookupBySessionKey={folderLookupBySessionKey}
           traces={realtimeTraceCandidates}
           formatUnixSeconds={formatUnixSeconds}
           showCustomTooltip={showCustomTooltip}
@@ -766,6 +868,13 @@ const RequestLogsList = memo(function RequestLogsList({
               const vLog = requestLogs[virtualRow.index];
               const vTrace = tracesByTraceId.get(vLog.trace_id);
               const vNow = vTrace && isPersistedRequestLogInProgress(vLog) ? nowMs : 0;
+              const sessionFolder = (() => {
+                const key = sessionFolderLookupKey(
+                  vLog.cli_key,
+                  vLog.session_id ?? vTrace?.session_id
+                );
+                return key ? (folderLookupBySessionKey.get(key) ?? null) : null;
+              })();
               return (
                 <div key={vLog.id} data-index={virtualRow.index} ref={virtualizer.measureElement}>
                   <RequestLogCard
@@ -774,6 +883,7 @@ const RequestLogsList = memo(function RequestLogsList({
                     liveTrace={vTrace}
                     nowMs={vNow}
                     isSelected={selectedLogId === vLog.id}
+                    sessionFolder={sessionFolder}
                     showCustomTooltip={showCustomTooltip}
                     onSelectLogId={onSelectLogId}
                     formatUnixSeconds={formatUnixSeconds}
