@@ -378,15 +378,29 @@ export const RealtimeTraceCards = memo(function RealtimeTraceCards({
                     </span>
                   )}
 
-                  <span className="ml-auto flex w-[150px] shrink-0 items-center justify-end gap-1.5 text-xs text-slate-400 dark:text-slate-500 whitespace-nowrap">
-                    {hasSessionReuse && <SessionReuseBadge showCustomTooltip={showCustomTooltip} />}
-                    <Clock className="h-3 w-3 shrink-0" />
-                    {formatUnixSeconds(Math.floor(trace.first_seen_ms / 1000))}
-                  </span>
+                  {!isInProgress ? (
+                    <span className="ml-auto flex w-[150px] shrink-0 items-center justify-end gap-1.5 text-xs text-slate-400 dark:text-slate-500 whitespace-nowrap">
+                      {hasSessionReuse && (
+                        <SessionReuseBadge showCustomTooltip={showCustomTooltip} />
+                      )}
+                      <Clock className="h-3 w-3 shrink-0" />
+                      {formatUnixSeconds(Math.floor(trace.first_seen_ms / 1000))}
+                    </span>
+                  ) : (
+                    <span className="ml-auto flex shrink-0 items-center gap-2 whitespace-nowrap">
+                      {hasSessionReuse && (
+                        <SessionReuseBadge showCustomTooltip={showCustomTooltip} />
+                      )}
+                      <span className="inline-flex items-center gap-1.5 text-xs font-mono tabular-nums text-indigo-600 dark:text-indigo-300">
+                        <Clock className="h-3 w-3 shrink-0 text-slate-400 dark:text-slate-500" />
+                        {formatDurationMs(runningMs)}
+                      </span>
+                    </span>
+                  )}
                 </div>
 
                 {isInProgress ? (
-                  <div className="grid grid-cols-2 gap-2 text-[11px] lg:grid-cols-[fit-content(180px)_fit-content(96px)_fit-content(128px)_minmax(0,1fr)]">
+                  <div className="grid grid-cols-2 gap-2 text-[11px] lg:grid-cols-[fit-content(180px)_fit-content(96px)_minmax(0,1fr)]">
                     <div className="rounded-md border border-indigo-200/60 bg-indigo-50/70 px-2.5 py-2 dark:border-indigo-500/20 dark:bg-indigo-500/10">
                       <div className="text-slate-400 dark:text-slate-500">当前阶段</div>
                       <div className="mt-1 truncate font-semibold text-indigo-600 dark:text-indigo-300">
@@ -399,13 +413,7 @@ export const RealtimeTraceCards = memo(function RealtimeTraceCards({
                         {formatInteger(trace.attempts.length)}
                       </div>
                     </div>
-                    <div className="rounded-md border border-slate-200/70 bg-slate-50/80 px-2.5 py-2 dark:border-slate-700/70 dark:bg-slate-800/70">
-                      <div className="text-slate-400 dark:text-slate-500">已运行</div>
-                      <div className="mt-1 truncate font-mono tabular-nums font-medium text-indigo-600 dark:text-indigo-300">
-                        {formatDurationMs(runningMs)}
-                      </div>
-                    </div>
-                    <div className="rounded-md border border-slate-200/70 bg-slate-50/80 px-2.5 py-2 dark:border-slate-700/70 dark:bg-slate-800/70">
+                    <div className="col-span-2 rounded-md border border-slate-200/70 bg-slate-50/80 px-2.5 py-2 dark:border-slate-700/70 dark:bg-slate-800/70 lg:col-span-1">
                       <div className="text-slate-400 dark:text-slate-500">当前链路</div>
                       <div
                         className="mt-1 truncate font-medium text-slate-700 dark:text-slate-200"
