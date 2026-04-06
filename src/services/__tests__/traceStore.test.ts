@@ -278,6 +278,68 @@ describe("services/traceStore", () => {
     vi.useRealTimers();
   });
 
+  it("preserves and backfills session_id across realtime event updates", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(0);
+
+    const { ingestTraceStart, ingestTraceAttempt, ingestTraceRequest, useTraceStore } =
+      await importFreshTraceStore();
+    const { result } = renderHook(() => useTraceStore());
+
+    act(() => {
+      ingestTraceStart({
+        trace_id: "t-session",
+        cli_key: "codex",
+        session_id: "session-from-start",
+        method: "POST",
+        path: "/v1/responses",
+        query: null,
+        ts: 0,
+      });
+    });
+    expect(result.current.traces[0]?.session_id).toBe("session-from-start");
+
+    act(() => {
+      ingestTraceAttempt({
+        trace_id: "t-session",
+        cli_key: "codex",
+        method: "POST",
+        path: "/v1/responses",
+        query: null,
+        attempt_index: 1,
+        provider_id: 1,
+        provider_name: "P1",
+        base_url: "https://p1",
+        outcome: "started",
+        status: null,
+        attempt_started_ms: 0,
+        attempt_duration_ms: 0,
+      });
+    });
+    expect(result.current.traces[0]?.session_id).toBe("session-from-start");
+
+    act(() => {
+      ingestTraceRequest({
+        trace_id: "t-session-2",
+        cli_key: "claude",
+        session_id: "session-from-summary",
+        method: "POST",
+        path: "/v1/messages",
+        query: null,
+        status: 200,
+        error_category: null,
+        error_code: null,
+        duration_ms: 50,
+        attempts: [],
+      });
+    });
+    expect(
+      result.current.traces.find((trace) => trace.trace_id === "t-session-2")?.session_id
+    ).toBe("session-from-summary");
+
+    vi.useRealTimers();
+  });
+
   it("ignores payloads with missing trace_id", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(0);

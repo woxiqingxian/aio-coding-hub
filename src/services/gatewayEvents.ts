@@ -17,6 +17,7 @@ export type GatewayAttempt = {
 export type GatewayRequestEvent = {
   trace_id: string;
   cli_key: string;
+  session_id?: string | null;
   method: string;
   path: string;
   query: string | null;
@@ -39,6 +40,7 @@ export type GatewayRequestEvent = {
 export type GatewayRequestStartEvent = {
   trace_id: string;
   cli_key: string;
+  session_id?: string | null;
   method: string;
   path: string;
   query: string | null;
@@ -49,6 +51,7 @@ export type GatewayRequestStartEvent = {
 export type GatewayAttemptEvent = {
   trace_id: string;
   cli_key: string;
+  session_id?: string | null;
   method: string;
   path: string;
   query: string | null;

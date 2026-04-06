@@ -971,6 +971,7 @@ pub(super) async fn run(mut input: RequestContext) -> Response {
                     GatewayAttemptEvent {
                         trace_id: input.trace_id.clone(),
                         cli_key: input.cli_key.clone(),
+                        session_id: input.session_id.clone(),
                         method: input.method_hint.clone(),
                         path: input.forwarded_path.clone(),
                         query: input.query.clone(),

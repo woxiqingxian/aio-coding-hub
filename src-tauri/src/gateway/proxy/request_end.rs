@@ -311,6 +311,7 @@ impl RequestLogEnqueueArgs {
             app,
             self.trace_id.clone(),
             self.cli_key.clone(),
+            self.session_id.clone(),
             self.method.clone(),
             self.path.clone(),
             self.query.clone(),

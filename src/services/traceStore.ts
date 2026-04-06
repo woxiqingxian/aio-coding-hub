@@ -139,6 +139,7 @@ export function ingestTraceStart(payload: GatewayRequestStartEvent) {
     (now) => ({
       trace_id: payload.trace_id,
       cli_key: payload.cli_key,
+      session_id: payload.session_id ?? null,
       method: payload.method,
       path: payload.path,
       query: payload.query ?? null,
@@ -153,6 +154,7 @@ export function ingestTraceStart(payload: GatewayRequestStartEvent) {
       return {
         ...existing,
         cli_key: payload.cli_key,
+        session_id: payload.session_id ?? existing.session_id ?? null,
         method: payload.method,
         path: payload.path,
         query: payload.query ?? null,
@@ -172,6 +174,7 @@ export function ingestTraceAttempt(payload: GatewayAttemptEvent) {
     (now) => ({
       trace_id: payload.trace_id,
       cli_key: payload.cli_key,
+      session_id: payload.session_id ?? null,
       method: payload.method,
       path: payload.path,
       query: payload.query ?? null,
@@ -185,6 +188,7 @@ export function ingestTraceAttempt(payload: GatewayAttemptEvent) {
       return {
         ...existing,
         cli_key: payload.cli_key,
+        session_id: payload.session_id ?? existing.session_id ?? null,
         method: payload.method,
         path: payload.path,
         query: payload.query ?? null,
@@ -204,6 +208,7 @@ export function ingestTraceRequest(payload: GatewayRequestEvent) {
     (now) => ({
       trace_id: payload.trace_id,
       cli_key: payload.cli_key,
+      session_id: payload.session_id ?? null,
       method: payload.method,
       path: payload.path,
       query: payload.query ?? null,
@@ -218,6 +223,7 @@ export function ingestTraceRequest(payload: GatewayRequestEvent) {
       return {
         ...existing,
         cli_key: payload.cli_key,
+        session_id: payload.session_id ?? existing.session_id ?? null,
         method: payload.method,
         path: payload.path,
         query: payload.query ?? null,

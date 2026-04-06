@@ -86,6 +86,7 @@ pub(super) struct FailoverAttempt {
 struct GatewayRequestEvent {
     trace_id: String,
     cli_key: String,
+    session_id: Option<String>,
     method: String,
     path: String,
     query: Option<String>,
@@ -109,6 +110,7 @@ struct GatewayRequestEvent {
 struct GatewayRequestStartEvent {
     trace_id: String,
     cli_key: String,
+    session_id: Option<String>,
     method: String,
     path: String,
     query: Option<String>,
@@ -120,6 +122,7 @@ struct GatewayRequestStartEvent {
 pub(super) struct GatewayAttemptEvent {
     pub(super) trace_id: String,
     pub(super) cli_key: String,
+    pub(super) session_id: Option<String>,
     pub(super) method: String,
     pub(super) path: String,
     pub(super) query: Option<String>,
@@ -188,6 +191,7 @@ pub(super) fn emit_request_event(
     app: &tauri::AppHandle,
     trace_id: String,
     cli_key: String,
+    session_id: Option<String>,
     method: String,
     path: String,
     query: Option<String>,
@@ -204,6 +208,7 @@ pub(super) fn emit_request_event(
     let payload = GatewayRequestEvent {
         trace_id,
         cli_key,
+        session_id,
         method,
         path,
         query,
@@ -231,6 +236,7 @@ pub(super) fn emit_request_start_event(
     app: &tauri::AppHandle,
     trace_id: String,
     cli_key: String,
+    session_id: Option<String>,
     method: String,
     path: String,
     query: Option<String>,
@@ -240,6 +246,7 @@ pub(super) fn emit_request_start_event(
     let payload = GatewayRequestStartEvent {
         trace_id,
         cli_key,
+        session_id,
         method,
         path,
         query,
