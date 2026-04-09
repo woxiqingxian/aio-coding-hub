@@ -6,7 +6,7 @@ import {
   requestLogsListAfterIdAll,
   requestLogsListAll,
   type RequestLogSummary,
-} from "../../services/requestLogs";
+} from "../../services/gateway/requestLogs";
 import { createQueryWrapper, createTestQueryClient } from "../../test/utils/reactQuery";
 import { setTauriRuntime } from "../../test/utils/tauriRuntime";
 import {
@@ -17,9 +17,9 @@ import {
   useRequestLogsListAllQuery,
 } from "../requestLogs";
 
-vi.mock("../../services/requestLogs", async () => {
-  const actual = await vi.importActual<typeof import("../../services/requestLogs")>(
-    "../../services/requestLogs"
+vi.mock("../../services/gateway/requestLogs", async () => {
+  const actual = await vi.importActual<typeof import("../../services/gateway/requestLogs")>(
+    "../../services/gateway/requestLogs"
   );
   return {
     ...actual,

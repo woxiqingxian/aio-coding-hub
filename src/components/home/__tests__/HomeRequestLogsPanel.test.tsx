@@ -2,9 +2,9 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
-import type { CliSessionsFolderLookupEntry } from "../../../services/cliSessions";
-import type { RequestLogSummary } from "../../../services/requestLogs";
-import type { TraceSession } from "../../../services/traceStore";
+import type { CliSessionsFolderLookupEntry } from "../../../services/cli/cliSessions";
+import type { RequestLogSummary } from "../../../services/gateway/requestLogs";
+import type { TraceSession } from "../../../services/gateway/traceStore";
 import { HomeRequestLogsPanel } from "../HomeRequestLogsPanel";
 
 const { useCliSessionsFolderLookupByIdsQueryMock } = vi.hoisted(() => ({

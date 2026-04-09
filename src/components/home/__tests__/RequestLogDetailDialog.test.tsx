@@ -1,7 +1,7 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { RequestAttemptLog, RequestLogDetail } from "../../../services/requestLogs";
-import type { TraceSession } from "../../../services/traceStore";
+import type { RequestAttemptLog, RequestLogDetail } from "../../../services/gateway/requestLogs";
+import type { TraceSession } from "../../../services/gateway/traceStore";
 import { RequestLogDetailDialog } from "../RequestLogDetailDialog";
 
 const requestLogQueryState = vi.hoisted(() => ({
@@ -26,7 +26,7 @@ vi.mock("../../../query/requestLogs", () => ({
   }),
 }));
 
-vi.mock("../../../services/traceStore", () => ({
+vi.mock("../../../services/gateway/traceStore", () => ({
   useTraceStore: () => ({
     traces: traceStoreState.traces,
   }),

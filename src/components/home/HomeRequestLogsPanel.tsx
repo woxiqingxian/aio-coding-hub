@@ -12,9 +12,9 @@ import type {
   CliSessionsFolderLookupEntry,
   CliSessionsFolderLookupInput,
   CliSessionsSource,
-} from "../../services/cliSessions";
-import type { RequestLogSummary } from "../../services/requestLogs";
-import type { TraceSession } from "../../services/traceStore";
+} from "../../services/cli/cliSessions";
+import type { RequestLogSummary } from "../../services/gateway/requestLogs";
+import type { TraceSession } from "../../services/gateway/traceStore";
 import { Button } from "../../ui/Button";
 import { Card } from "../../ui/Card";
 import { EmptyState } from "../../ui/EmptyState";

@@ -4,13 +4,13 @@
 
 import type { ReactNode } from "react";
 import { useNowMs } from "../../hooks/useNowMs";
-import { useTraceStore } from "../../services/traceStore";
+import { useTraceStore } from "../../services/gateway/traceStore";
 import { cliBadgeTone, cliShortLabel } from "../../constants/clis";
 import {
   useRequestAttemptLogsByTraceIdQuery,
   useRequestLogDetailQuery,
 } from "../../query/requestLogs";
-import type { RequestLogDetail } from "../../services/requestLogs";
+import type { RequestLogDetail } from "../../services/gateway/requestLogs";
 import { Card } from "../../ui/Card";
 import { Dialog } from "../../ui/Dialog";
 import { cn } from "../../utils/cn";

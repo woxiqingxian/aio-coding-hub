@@ -3,9 +3,9 @@
 // - Designed to keep status badge / error_code label / session reuse tooltip consistent across the Home page.
 
 import { GatewayErrorCodes, getGatewayErrorShortLabel } from "../../constants/gatewayErrorCodes";
-import type { CliKey } from "../../services/providers";
-import type { RequestLogRouteHop } from "../../services/requestLogs";
-import type { TraceSession } from "../../services/traceStore";
+import type { CliKey } from "../../services/providers/providers";
+import type { RequestLogRouteHop } from "../../services/gateway/requestLogs";
+import type { TraceSession } from "../../services/gateway/traceStore";
 import { Tooltip } from "../../ui/Tooltip";
 import { FolderOpen } from "lucide-react";
 import { RouteTooltipContent } from "./RouteTooltipContent";
