@@ -195,7 +195,8 @@ describe("home/RequestLogDetailDialog", () => {
     render(<RequestLogDetailDialog selectedLogId={1} onSelectLogId={vi.fn()} />);
 
     expect(screen.queryByText("关键指标")).not.toBeInTheDocument();
-    expect(screen.getByText("当前供应商：未知")).toBeInTheDocument();
+    // Without a live trace, a status-null log is treated as abandoned (not in-progress).
+    expect(screen.getByText("最终供应商：未知")).toBeInTheDocument();
     expect(screen.getByText("决策链")).toBeInTheDocument();
   });
 
