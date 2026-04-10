@@ -246,6 +246,7 @@ impl CircuitBreaker {
                     entry.state = CircuitState::Open;
                     entry.half_open_success_count = 0;
                     entry.failure_timestamps.push(now_u64);
+                    entry.prune_old_failures(now_u64);
                     entry.open_until = Some(now_unix.saturating_add(cfg.open_duration_secs));
                     entry.updated_at = now_unix;
 

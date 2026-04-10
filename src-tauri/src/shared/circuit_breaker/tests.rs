@@ -1,5 +1,6 @@
 use super::types::*;
 use super::*;
+use types::MAX_FAILURE_TIMESTAMPS;
 
 fn breaker() -> CircuitBreaker {
     CircuitBreaker::new(CircuitBreakerConfig::default(), HashMap::new(), None)
@@ -323,6 +324,36 @@ fn update_config_recalculates_open_until() {
     let check = cb.should_allow(pid, new_open_until);
     assert!(check.allow);
     assert_eq!(check.after.state, CircuitState::HalfOpen);
+}
+
+#[test]
+fn failure_timestamps_capped_at_max() {
+    let cb = CircuitBreaker::new(
+        CircuitBreakerConfig {
+            failure_threshold: (MAX_FAILURE_TIMESTAMPS as u32) + 100,
+            open_duration_secs: 60,
+        },
+        HashMap::new(),
+        None,
+    );
+    let pid = 1;
+    let now: i64 = 10_000;
+
+    // Record more failures than the hard cap, all within the window
+    for i in 0..(MAX_FAILURE_TIMESTAMPS + 50) {
+        cb.record_failure(pid, now + i as i64);
+    }
+
+    let snap = cb.snapshot(pid, now + (MAX_FAILURE_TIMESTAMPS + 50) as i64);
+    // failure_count should be capped at MAX_FAILURE_TIMESTAMPS
+    assert!(
+        snap.failure_count <= MAX_FAILURE_TIMESTAMPS as u32,
+        "failure_count {} exceeded hard cap {}",
+        snap.failure_count,
+        MAX_FAILURE_TIMESTAMPS,
+    );
+    // Circuit should still be Closed because threshold is set very high
+    assert_eq!(snap.state, CircuitState::Closed);
 }
 
 #[test]

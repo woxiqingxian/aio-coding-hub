@@ -1,6 +1,6 @@
 //! Usage: Codex ChatGPT backend compatibility helpers for `failover_loop`.
 
-use super::super::super::protocol_bridge::cx2cc as bridge_cx2cc;
+use crate::gateway::proxy::protocol_bridge::cx2cc as bridge_cx2cc;
 use axum::body::Bytes;
 use axum::http::{header, HeaderMap, HeaderName, HeaderValue};
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;

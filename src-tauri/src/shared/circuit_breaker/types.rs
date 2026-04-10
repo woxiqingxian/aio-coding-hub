@@ -5,6 +5,9 @@ use tokio::sync::mpsc;
 /// Failures older than this window (in seconds) are not counted toward the threshold.
 pub(super) const FAILURE_WINDOW_SECS: u64 = 300;
 
+/// Hard cap on stored failure timestamps to prevent unbounded memory growth.
+pub(super) const MAX_FAILURE_TIMESTAMPS: usize = 256;
+
 /// In HalfOpen state, this many consecutive successes are required to close the circuit.
 pub(super) const HALF_OPEN_SUCCESS_REQUIRED: u32 = 3;
 
@@ -124,10 +127,15 @@ impl ProviderHealth {
         count.min(u32::MAX as usize) as u32
     }
 
-    /// Remove failure timestamps that have fallen outside the window.
+    /// Remove failure timestamps that have fallen outside the window,
+    /// and enforce a hard cap to prevent unbounded growth.
     pub(super) fn prune_old_failures(&mut self, now: u64) {
         let cutoff = now.saturating_sub(FAILURE_WINDOW_SECS);
         self.failure_timestamps.retain(|&ts| ts > cutoff);
+        if self.failure_timestamps.len() > MAX_FAILURE_TIMESTAMPS {
+            let excess = self.failure_timestamps.len() - MAX_FAILURE_TIMESTAMPS;
+            self.failure_timestamps.drain(..excess);
+        }
     }
 }
 

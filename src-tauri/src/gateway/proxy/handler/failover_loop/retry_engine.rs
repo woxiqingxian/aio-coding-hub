@@ -7,6 +7,7 @@
 use super::*;
 use super::attempt_executor::{AttemptSendOutcome, RetryLoopState};
 use super::provider_iterator::PreparedProvider;
+use crate::gateway::proxy::request_context::RequestContext;
 
 /// Run the inner retry loop for a single prepared provider.
 ///
@@ -15,32 +16,24 @@ use super::provider_iterator::PreparedProvider;
 /// exhausted and the outer loop should try the next provider.
 pub(super) async fn run_retry_loop(
     ctx: CommonCtx<'_>,
-    input: &super::super::super::request_context::RequestContext,
-    abort_guard: &mut super::super::super::abort_guard::RequestAbortGuard,
+    input: &RequestContext,
     prepared: &mut PreparedProvider,
-    attempts: &mut Vec<FailoverAttempt>,
-    failed_provider_ids: &mut HashSet<i64>,
-    last_error_category: &mut Option<&'static str>,
-    last_error_code: &mut Option<&'static str>,
-    circuit_snapshot: &mut crate::circuit_breaker::CircuitSnapshot,
+    mut loop_state: LoopState<'_>,
 ) -> Option<Response> {
     let mut retry_state = RetryLoopState::new();
 
     for retry_index in 1..=prepared.provider_max_attempts {
-        let attempt_index = attempts.len().saturating_add(1) as u32;
+        let attempt_index = loop_state.attempts.len().saturating_add(1) as u32;
 
         let send_outcome = attempt_executor::execute_attempt(
-            ctx, input, abort_guard, prepared, &mut retry_state,
-            retry_index, attempt_index, attempts, failed_provider_ids,
-            last_error_category, last_error_code, circuit_snapshot,
+            ctx, input, prepared, &mut retry_state,
+            retry_index, attempt_index, &mut loop_state,
         )
         .await;
 
         let ctrl = dispatch_outcome(
-            ctx, input, abort_guard, prepared, &mut retry_state,
-            retry_index, attempt_index, send_outcome, attempts,
-            failed_provider_ids, last_error_category, last_error_code,
-            circuit_snapshot,
+            ctx, input, prepared, &mut retry_state,
+            retry_index, attempt_index, send_outcome, &mut loop_state,
         )
         .await;
 
@@ -56,52 +49,38 @@ pub(super) async fn run_retry_loop(
 
 /// Dispatch one attempt outcome to the appropriate handler and return
 /// a `LoopControl` for the retry loop.
-#[allow(clippy::too_many_arguments)]
 async fn dispatch_outcome(
     ctx: CommonCtx<'_>,
-    input: &super::super::super::request_context::RequestContext,
-    abort_guard: &mut super::super::super::abort_guard::RequestAbortGuard,
+    input: &RequestContext,
     prepared: &mut PreparedProvider,
     retry_state: &mut RetryLoopState,
     retry_index: u32,
     attempt_index: u32,
     send_outcome: AttemptSendOutcome,
-    attempts: &mut Vec<FailoverAttempt>,
-    failed_provider_ids: &mut HashSet<i64>,
-    last_error_category: &mut Option<&'static str>,
-    last_error_code: &mut Option<&'static str>,
-    circuit_snapshot: &mut crate::circuit_breaker::CircuitSnapshot,
+    loop_state: &mut LoopState<'_>,
 ) -> LoopControl {
     match send_outcome {
         AttemptSendOutcome::UrlBuildFailed(ctrl) => ctrl,
         AttemptSendOutcome::OAuthInjectFailed => LoopControl::BreakRetry,
         AttemptSendOutcome::Response(resp) => {
             response_router::route_response(
-                ctx, input, abort_guard, prepared, retry_state,
-                retry_index, attempt_index, resp, attempts,
-                failed_provider_ids, last_error_category,
-                last_error_code, circuit_snapshot,
+                ctx, input, prepared, retry_state,
+                retry_index, attempt_index, resp, loop_state,
             )
             .await
         }
         AttemptSendOutcome::Timeout => {
             let (attempt_ctx, provider_ctx) =
                 build_error_contexts(input, prepared, attempt_index, retry_index);
-            let loop_state = LoopState::new(
-                attempts, failed_provider_ids, last_error_category,
-                last_error_code, circuit_snapshot, abort_guard,
-            );
-            send_timeout::handle_timeout(ctx, provider_ctx, attempt_ctx, loop_state).await
+            send_timeout::handle_timeout(
+                ctx, provider_ctx, attempt_ctx, loop_state.reborrow(),
+            ).await
         }
         AttemptSendOutcome::ReqwestError(err) => {
             let (attempt_ctx, provider_ctx) =
                 build_error_contexts(input, prepared, attempt_index, retry_index);
-            let loop_state = LoopState::new(
-                attempts, failed_provider_ids, last_error_category,
-                last_error_code, circuit_snapshot, abort_guard,
-            );
             upstream_error::handle_reqwest_error(
-                ctx, provider_ctx, attempt_ctx, loop_state, err,
+                ctx, provider_ctx, attempt_ctx, loop_state.reborrow(), err,
             )
             .await
         }
@@ -110,7 +89,7 @@ async fn dispatch_outcome(
 
 /// Build `AttemptCtx` and `ProviderCtx` for error-path handling (timeout / reqwest error).
 fn build_error_contexts<'a>(
-    input: &super::super::super::request_context::RequestContext,
+    input: &RequestContext,
     prepared: &'a PreparedProvider,
     attempt_index: u32,
     retry_index: u32,

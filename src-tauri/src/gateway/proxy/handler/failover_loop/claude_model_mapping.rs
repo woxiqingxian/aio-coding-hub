@@ -1,6 +1,6 @@
 //! Usage: Claude model mapping application for a provider attempt.
 
-use super::super::super::model_rewrite::{
+use crate::gateway::proxy::model_rewrite::{
     replace_model_in_body_json, replace_model_in_path, replace_model_in_query,
 };
 use super::context::{CommonCtx, ProviderCtx};

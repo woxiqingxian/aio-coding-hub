@@ -22,13 +22,12 @@ mod response_router;
 mod retry_engine;
 mod send;
 mod send_timeout;
-pub(super) mod session_updater;
 mod success_event_stream;
 mod success_non_stream;
 mod thinking_signature_rectifier_400;
 mod upstream_error;
 
-use super::super::request_context::RequestContext;
+use crate::gateway::proxy::request_context::RequestContext;
 use attempt_record::{
     record_system_failure_and_decide, record_system_failure_and_decide_no_cooldown,
     RecordSystemFailureArgs,
@@ -55,7 +54,7 @@ use request_end_helpers::{
     emit_request_event_and_enqueue_request_log, RequestEndArgs, RequestEndDeps,
 };
 
-use super::super::{
+use crate::gateway::proxy::{
     errors::{classify_upstream_status, error_response},
     failover::{retry_backoff_delay, select_provider_base_url_for_request, FailoverDecision},
     gemini_oauth,
@@ -172,9 +171,12 @@ pub(super) async fn run(mut input: RequestContext) -> Response {
         let mut circuit_snapshot = prepared.circuit_snapshot.clone();
 
         if let Some(resp) = retry_engine::run_retry_loop(
-            ctx, &input, &mut abort_guard, &mut prepared, &mut attempts,
-            &mut failed_provider_ids, &mut last_error_category,
-            &mut last_error_code, &mut circuit_snapshot,
+            ctx, &input, &mut prepared,
+            LoopState::new(
+                &mut attempts, &mut failed_provider_ids,
+                &mut last_error_category, &mut last_error_code,
+                &mut circuit_snapshot, &mut abort_guard,
+            ),
         )
         .await
         {

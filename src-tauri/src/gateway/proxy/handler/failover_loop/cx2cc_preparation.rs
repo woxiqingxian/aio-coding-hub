@@ -6,6 +6,7 @@
 
 use super::*;
 use super::provider_iterator::SkipReason;
+use crate::gateway::proxy::protocol_bridge::{self, BridgeContext};
 
 /// All CX2CC-related state produced by preparation.
 pub(super) struct Cx2ccResult {
@@ -97,7 +98,7 @@ pub(super) async fn prepare(args: Cx2ccPreparationInput<'_>) -> Cx2ccOutcome {
         .get("model")
         .and_then(|m| m.as_str())
         .unwrap_or("");
-    let bridge_ctx = super::super::super::protocol_bridge::BridgeContext {
+    let bridge_ctx = BridgeContext {
         claude_models: args
             .input
             .providers
@@ -112,7 +113,7 @@ pub(super) async fn prepare(args: Cx2ccPreparationInput<'_>) -> Cx2ccOutcome {
         is_chatgpt_backend: false,
     };
 
-    let translated = match super::super::super::protocol_bridge::get_bridge("cx2cc")
+    let translated = match protocol_bridge::get_bridge("cx2cc")
         .ok_or_else(|| "cx2cc bridge not registered".to_string())
         .and_then(|bridge| {
             bridge

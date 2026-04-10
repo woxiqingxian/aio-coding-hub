@@ -7,6 +7,7 @@
 use super::*;
 use super::attempt_executor::RetryLoopState;
 use super::provider_iterator::PreparedProvider;
+use crate::gateway::proxy::request_context::RequestContext;
 
 /// Inject authentication headers based on provider type and auth mode.
 ///
@@ -15,7 +16,7 @@ use super::provider_iterator::PreparedProvider;
 /// loop should break).
 pub(super) fn inject_auth(
     ctx: CommonCtx<'_>,
-    input: &super::super::super::request_context::RequestContext,
+    input: &RequestContext,
     prepared: &PreparedProvider,
     retry_state: &RetryLoopState,
     retry_index: u32,
@@ -60,7 +61,7 @@ pub(super) fn inject_auth(
 
 /// Clean request body (e.g. remove empty text blocks for Claude OAuth).
 pub(super) fn clean_body(
-    input: &super::super::super::request_context::RequestContext,
+    input: &RequestContext,
     prepared: &PreparedProvider,
 ) -> Bytes {
     if input.cli_key == "claude" && prepared.oauth_adapter.is_some() {
@@ -94,7 +95,7 @@ pub(super) fn clean_body(
 
 fn inject_oauth_auth(
     prepared: &PreparedProvider,
-    input: &super::super::super::request_context::RequestContext,
+    input: &RequestContext,
     attempt_index: u32,
     retry_index: u32,
     attempt_started_ms: u128,
@@ -174,7 +175,7 @@ fn inject_oauth_auth(
 
 fn inject_standard_auth(
     ctx: CommonCtx<'_>,
-    input: &super::super::super::request_context::RequestContext,
+    input: &RequestContext,
     prepared: &PreparedProvider,
     retry_state: &RetryLoopState,
     retry_index: u32,

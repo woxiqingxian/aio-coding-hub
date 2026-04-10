@@ -5,6 +5,8 @@
 
 use super::*;
 use super::provider_iterator::PreparedProvider;
+use crate::gateway::proxy::abort_guard::RequestAbortGuard;
+use crate::gateway::proxy::request_context::RequestContext;
 
 /// Mutable per-provider state that persists across retries within one provider.
 pub(super) struct RetryLoopState {
@@ -39,36 +41,37 @@ pub(super) enum AttemptSendOutcome {
 /// Build request headers, inject auth, clean body, send upstream, and return
 /// the raw outcome. The caller (retry engine / response router) handles the
 /// result.
-#[allow(clippy::too_many_arguments)]
 pub(super) async fn execute_attempt(
     ctx: CommonCtx<'_>,
-    input: &super::super::super::request_context::RequestContext,
-    abort_guard: &mut super::super::super::abort_guard::RequestAbortGuard,
+    input: &RequestContext,
     prepared: &mut PreparedProvider,
     retry_state: &mut RetryLoopState,
     retry_index: u32,
     attempt_index: u32,
-    attempts: &mut Vec<FailoverAttempt>,
-    failed_provider_ids: &mut HashSet<i64>,
-    last_error_category: &mut Option<&'static str>,
-    last_error_code: &mut Option<&'static str>,
-    circuit_snapshot: &mut crate::circuit_breaker::CircuitSnapshot,
+    loop_state: &mut LoopState<'_>,
 ) -> AttemptSendOutcome {
     let attempt_started_ms = input.started.elapsed().as_millis();
     let circuit_before = prepared.circuit_snapshot.clone();
 
     // --- Build URL ---
-    let url = match build_url(ctx, input, prepared, attempt_index, retry_index,
-        attempt_started_ms, &circuit_before, attempts, failed_provider_ids,
-        last_error_category, last_error_code, circuit_snapshot, abort_guard,
-    ).await {
+    let url = match try_build_url(prepared) {
         Ok(u) => u,
-        Err(outcome) => return outcome,
+        Err(err) => {
+            let attempt_ctx = build_attempt_ctx(
+                attempt_index, retry_index, attempt_started_ms,
+                &circuit_before, prepared,
+            );
+            let provider_ctx = build_provider_ctx(prepared);
+            let ctrl = handle_url_build_failure(
+                ctx, input, attempt_ctx, provider_ctx, err, loop_state,
+            ).await;
+            return AttemptSendOutcome::UrlBuildFailed(ctrl);
+        }
     };
 
     // --- Emit "started" attempt event ---
     emit_started_event(input, prepared, attempt_index, retry_index,
-        attempt_started_ms, &circuit_before, abort_guard);
+        attempt_started_ms, &circuit_before, loop_state.abort_guard);
 
     // --- Build headers + inject auth ---
     let mut headers = input.base_headers.clone();
@@ -85,7 +88,7 @@ pub(super) async fn execute_attempt(
         ctx, input, prepared, retry_state, retry_index, attempt_index,
         attempt_started_ms, &circuit_before, &mut headers,
     ) {
-        attempts.push(failed_attempt);
+        loop_state.attempts.push(failed_attempt);
         return AttemptSendOutcome::OAuthInjectFailed;
     }
 
@@ -108,86 +111,85 @@ pub(super) async fn execute_attempt(
 // Helpers
 // ---------------------------------------------------------------------------
 
-#[allow(clippy::too_many_arguments)]
-async fn build_url(
-    ctx: CommonCtx<'_>,
-    input: &super::super::super::request_context::RequestContext,
-    prepared: &PreparedProvider,
-    attempt_index: u32,
-    retry_index: u32,
-    attempt_started_ms: u128,
-    circuit_before: &crate::circuit_breaker::CircuitSnapshot,
-    attempts: &mut Vec<FailoverAttempt>,
-    failed_provider_ids: &mut HashSet<i64>,
-    last_error_category: &mut Option<&'static str>,
-    last_error_code: &mut Option<&'static str>,
-    circuit_snapshot: &mut crate::circuit_breaker::CircuitSnapshot,
-    abort_guard: &mut super::super::super::abort_guard::RequestAbortGuard,
-) -> Result<reqwest::Url, AttemptSendOutcome> {
-    match build_target_url(
+fn try_build_url(prepared: &PreparedProvider) -> Result<reqwest::Url, String> {
+    build_target_url(
         &prepared.provider_base_url_base,
         &prepared.upstream_forwarded_path,
         prepared.upstream_query.as_deref(),
-    ) {
-        Ok(u) => Ok(u),
-        Err(err) => {
-            tracing::warn!(
-                trace_id = %input.trace_id,
-                cli_key = %input.cli_key,
-                provider_id = prepared.provider_id,
-                provider_name = %prepared.provider_name_base,
-                base_url = %prepared.provider_base_url_base,
-                forwarded_path = %prepared.upstream_forwarded_path,
-                "build_target_url failed: {err}"
-            );
-            let category = ErrorCategory::SystemError;
-            let error_code = GatewayErrorCode::InternalError.as_str();
-            let decision = FailoverDecision::SwitchProvider;
-            let outcome = format!(
-                "build_target_url_error: category={} code={} decision={} err={err}",
-                category.as_str(), error_code, decision.as_str(),
-            );
-            let attempt_started = Instant::now();
-            let attempt_ctx = AttemptCtx {
-                attempt_index, retry_index, attempt_started_ms, attempt_started,
-                circuit_before,
-                gemini_oauth_response_mode: prepared.gemini_oauth_response_mode,
-                cx2cc_active: prepared.cx2cc_active,
-                anthropic_stream_requested: prepared.anthropic_stream_requested,
-            };
-            let provider_ctx = ProviderCtx {
-                provider_id: prepared.provider_id,
-                provider_name_base: &prepared.provider_name_base,
-                provider_base_url_base: &prepared.provider_base_url_base,
-                provider_index: prepared.provider_index,
-                session_reuse: prepared.session_reuse,
-                stream_idle_timeout_seconds: prepared.stream_idle_timeout_seconds,
-            };
-            let loop_state = LoopState::new(
-                attempts, failed_provider_ids, last_error_category,
-                last_error_code, circuit_snapshot, abort_guard,
-            );
-            let ctrl = record_system_failure_and_decide_no_cooldown(
-                RecordSystemFailureArgs {
-                    ctx, provider_ctx, attempt_ctx, loop_state,
-                    status: None, error_code, decision, outcome,
-                    reason: format!("invalid base_url: {err}"),
-                },
-            )
-            .await;
-            Err(AttemptSendOutcome::UrlBuildFailed(ctrl))
-        }
+    )
+    .map_err(|e| e.to_string())
+}
+
+async fn handle_url_build_failure(
+    ctx: CommonCtx<'_>,
+    input: &RequestContext,
+    attempt_ctx: AttemptCtx<'_>,
+    provider_ctx: ProviderCtx<'_>,
+    err: String,
+    loop_state: &mut LoopState<'_>,
+) -> LoopControl {
+    tracing::warn!(
+        trace_id = %input.trace_id,
+        cli_key = %input.cli_key,
+        provider_id = provider_ctx.provider_id,
+        provider_name = %provider_ctx.provider_name_base,
+        base_url = %provider_ctx.provider_base_url_base,
+        "build_target_url failed: {err}"
+    );
+    let error_code = GatewayErrorCode::InternalError.as_str();
+    let decision = FailoverDecision::SwitchProvider;
+    let outcome = format!(
+        "build_target_url_error: category={} code={} decision={} err={err}",
+        ErrorCategory::SystemError.as_str(), error_code, decision.as_str(),
+    );
+    record_system_failure_and_decide_no_cooldown(
+        RecordSystemFailureArgs {
+            ctx, provider_ctx, attempt_ctx, loop_state: loop_state.reborrow(),
+            status: None, error_code, decision, outcome,
+            reason: format!("invalid base_url: {err}"),
+        },
+    )
+    .await
+}
+
+fn build_attempt_ctx<'a>(
+    attempt_index: u32,
+    retry_index: u32,
+    attempt_started_ms: u128,
+    circuit_before: &'a crate::circuit_breaker::CircuitSnapshot,
+    prepared: &PreparedProvider,
+) -> AttemptCtx<'a> {
+    AttemptCtx {
+        attempt_index,
+        retry_index,
+        attempt_started_ms,
+        attempt_started: Instant::now(),
+        circuit_before,
+        gemini_oauth_response_mode: prepared.gemini_oauth_response_mode,
+        cx2cc_active: prepared.cx2cc_active,
+        anthropic_stream_requested: prepared.anthropic_stream_requested,
+    }
+}
+
+fn build_provider_ctx(prepared: &PreparedProvider) -> ProviderCtx<'_> {
+    ProviderCtx {
+        provider_id: prepared.provider_id,
+        provider_name_base: &prepared.provider_name_base,
+        provider_base_url_base: &prepared.provider_base_url_base,
+        provider_index: prepared.provider_index,
+        session_reuse: prepared.session_reuse,
+        stream_idle_timeout_seconds: prepared.stream_idle_timeout_seconds,
     }
 }
 
 fn emit_started_event(
-    input: &super::super::super::request_context::RequestContext,
+    input: &RequestContext,
     prepared: &PreparedProvider,
     attempt_index: u32,
     retry_index: u32,
     attempt_started_ms: u128,
     circuit_before: &crate::circuit_breaker::CircuitSnapshot,
-    abort_guard: &mut super::super::super::abort_guard::RequestAbortGuard,
+    abort_guard: &mut RequestAbortGuard,
 ) {
     let started_attempt = FailoverAttempt {
         provider_id: prepared.provider_id,

@@ -7,26 +7,21 @@
 use super::*;
 use super::attempt_executor::RetryLoopState;
 use super::provider_iterator::PreparedProvider;
+use crate::gateway::proxy::request_context::RequestContext;
 
 /// Route an HTTP response from upstream to the appropriate handler.
 ///
 /// Returns a `LoopControl` indicating whether to continue retrying,
 /// break out of the retry loop, or return a final response.
-#[allow(clippy::too_many_arguments)]
 pub(super) async fn route_response(
     ctx: CommonCtx<'_>,
-    input: &super::super::super::request_context::RequestContext,
-    abort_guard: &mut super::super::super::abort_guard::RequestAbortGuard,
+    input: &RequestContext,
     prepared: &mut PreparedProvider,
     retry_state: &mut RetryLoopState,
     retry_index: u32,
     attempt_index: u32,
     resp: reqwest::Response,
-    attempts: &mut Vec<FailoverAttempt>,
-    failed_provider_ids: &mut HashSet<i64>,
-    last_error_category: &mut Option<&'static str>,
-    last_error_code: &mut Option<&'static str>,
-    circuit_snapshot: &mut crate::circuit_breaker::CircuitSnapshot,
+    loop_state: &mut LoopState<'_>,
 ) -> LoopControl {
     let status = resp.status();
     let response_headers = resp.headers().clone();
@@ -72,21 +67,17 @@ pub(super) async fn route_response(
     };
 
     if status.is_success() {
-        let loop_state = LoopState::new(
-            attempts, failed_provider_ids, last_error_category,
-            last_error_code, circuit_snapshot, abort_guard,
-        );
         if (prepared.anthropic_stream_requested || !prepared.cx2cc_active)
             && is_event_stream(&response_headers)
         {
             return success_event_stream::handle_success_event_stream(
-                ctx, provider_ctx, attempt_ctx, loop_state,
+                ctx, provider_ctx, attempt_ctx, loop_state.reborrow(),
                 resp, status, response_headers,
             )
             .await;
         }
         return success_non_stream::handle_success_non_stream(
-            ctx, provider_ctx, attempt_ctx, loop_state,
+            ctx, provider_ctx, attempt_ctx, loop_state.reborrow(),
             resp, status, response_headers,
         )
         .await;
@@ -142,15 +133,11 @@ pub(super) async fn route_response(
     };
 
     // --- Non-success upstream error handling ---
-    let loop_state = LoopState::new(
-        attempts, failed_provider_ids, last_error_category,
-        last_error_code, circuit_snapshot, abort_guard,
-    );
     upstream_error::handle_non_success_response(upstream_error::HandleNonSuccessResponseInput {
         ctx,
         provider_ctx,
         attempt_ctx,
-        loop_state,
+        loop_state: loop_state.reborrow(),
         enable_thinking_signature_rectifier: input.enable_thinking_signature_rectifier,
         enable_thinking_budget_rectifier: input.enable_thinking_budget_rectifier,
         resp,
@@ -170,7 +157,7 @@ pub(super) async fn route_response(
 // ---------------------------------------------------------------------------
 
 fn should_try_claude_auth_fallback(
-    input: &super::super::super::request_context::RequestContext,
+    input: &RequestContext,
     prepared: &PreparedProvider,
     retry_state: &RetryLoopState,
     retry_index: u32,
@@ -185,7 +172,7 @@ fn should_try_claude_auth_fallback(
 }
 
 async fn try_oauth_reactive_refresh(
-    input: &super::super::super::request_context::RequestContext,
+    input: &RequestContext,
     prepared: &mut PreparedProvider,
     retry_state: &mut RetryLoopState,
 ) -> Option<LoopControl> {
@@ -245,7 +232,7 @@ async fn try_oauth_reactive_refresh(
 }
 
 fn emit_cx2cc_upstream_log(
-    input: &super::super::super::request_context::RequestContext,
+    input: &RequestContext,
     prepared: &PreparedProvider,
     status: reqwest::StatusCode,
     response_content_type: &str,

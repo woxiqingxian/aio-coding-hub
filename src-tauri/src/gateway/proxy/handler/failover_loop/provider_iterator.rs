@@ -4,6 +4,7 @@
 
 use super::*;
 use super::provider_checks;
+use crate::gateway::proxy::gemini_oauth::GeminiOAuthResponseMode;
 
 /// All mutable state accumulated by the provider preparation phase that the
 /// retry loop (and later finalization) needs.
@@ -23,7 +24,7 @@ pub(super) struct PreparedProvider {
     pub(super) upstream_body_bytes: Bytes,
     pub(super) strip_request_content_encoding: bool,
     pub(super) gemini_oauth_response_mode:
-        Option<super::super::super::gemini_oauth::GeminiOAuthResponseMode>,
+        Option<GeminiOAuthResponseMode>,
     pub(super) use_codex_chatgpt_backend: bool,
     pub(super) codex_chatgpt_account_id: Option<String>,
     pub(super) cx2cc_active: bool,

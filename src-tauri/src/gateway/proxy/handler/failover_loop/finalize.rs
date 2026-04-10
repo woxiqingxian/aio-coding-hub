@@ -1,9 +1,9 @@
 //! Usage: Finalize responses for failover loop terminal states.
 
-use super::super::super::abort_guard::RequestAbortGuard;
-use super::super::super::caches::CachedGatewayError;
-use super::super::super::errors::{error_response, error_response_with_retry_after};
-use super::super::super::GatewayErrorCode;
+use crate::gateway::proxy::abort_guard::RequestAbortGuard;
+use crate::gateway::proxy::caches::CachedGatewayError;
+use crate::gateway::proxy::errors::{error_response, error_response_with_retry_after};
+use crate::gateway::proxy::GatewayErrorCode;
 use super::{emit_request_event_and_enqueue_request_log, RequestEndArgs, RequestEndDeps};
 use crate::gateway::events::FailoverAttempt;
 use crate::gateway::manager::GatewayAppState;

@@ -5,6 +5,7 @@
 
 use super::*;
 use super::provider_iterator::{IterationCounters, SkipReason};
+use crate::gateway::proxy::gemini_oauth::GeminiOAuthResponseMode;
 
 pub(super) fn skip_with_reason(
     attempts: &mut Vec<FailoverAttempt>,
@@ -215,7 +216,7 @@ pub(super) struct GeminiOAuthPrepared {
     pub(super) query: Option<String>,
     pub(super) body_bytes: Bytes,
     pub(super) strip_request_content_encoding: bool,
-    pub(super) response_mode: super::super::super::gemini_oauth::GeminiOAuthResponseMode,
+    pub(super) response_mode: GeminiOAuthResponseMode,
 }
 
 pub(super) async fn prepare_gemini_oauth(

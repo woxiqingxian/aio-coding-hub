@@ -1,17 +1,17 @@
 //! Usage: Handle upstream non-success responses and reqwest errors inside `failover_loop::run`.
 
-use super::super::super::errors::{
+use crate::gateway::proxy::errors::{
     classify_reqwest_error, classify_upstream_status, error_response,
 };
-use super::super::super::failover::{retry_backoff_delay, FailoverDecision};
-use super::super::super::http_util::{
+use crate::gateway::proxy::failover::{retry_backoff_delay, FailoverDecision};
+use crate::gateway::proxy::http_util::{
     build_response, has_gzip_content_encoding, has_non_identity_content_encoding,
     maybe_gunzip_response_body_bytes_with_limit,
 };
-use super::super::super::is_claude_count_tokens_request;
-use super::super::super::provider_router;
-use super::super::super::upstream_client_error_rules;
-use super::super::super::{ErrorCategory, GatewayErrorCode};
+use crate::gateway::proxy::is_claude_count_tokens_request;
+use crate::gateway::proxy::provider_router;
+use crate::gateway::proxy::upstream_client_error_rules;
+use crate::gateway::proxy::{ErrorCategory, GatewayErrorCode};
 use super::attempt_record::{
     record_system_failure_and_decide, record_system_failure_and_decide_no_cooldown,
     RecordSystemFailureArgs,
@@ -169,19 +169,18 @@ pub(super) async fn handle_non_success_response(
         && (enable_thinking_signature_rectifier || enable_thinking_budget_rectifier)
     {
         return thinking_signature_rectifier_400::handle_thinking_rectifiers_400(
-            ctx,
-            provider_ctx,
-            attempt_ctx,
-            loop_state,
-            enable_thinking_signature_rectifier,
-            enable_thinking_budget_rectifier,
-            resp,
-            status,
-            response_headers,
-            upstream.upstream_body_bytes,
-            upstream.strip_request_content_encoding,
-            upstream.thinking_signature_rectifier_retried,
-            upstream.thinking_budget_rectifier_retried,
+            thinking_signature_rectifier_400::HandleThinkingRectifiers400Input {
+                ctx,
+                provider_ctx,
+                attempt_ctx,
+                loop_state,
+                enable_thinking_signature_rectifier,
+                enable_thinking_budget_rectifier,
+                resp,
+                status,
+                response_headers,
+                upstream,
+            },
         )
         .await;
     }

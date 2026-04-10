@@ -1,6 +1,6 @@
 //! Usage: Handle upstream send timeout inside `failover_loop::run`.
 
-use super::super::super::is_claude_count_tokens_request;
+use crate::gateway::proxy::is_claude_count_tokens_request;
 use super::*;
 
 fn timeout_decision(

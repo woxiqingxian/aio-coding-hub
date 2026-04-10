@@ -47,7 +47,7 @@ fn new_special_settings() -> SpecialSettings {
 
 #[allow(clippy::too_many_arguments)]
 async fn enqueue_in_progress_request_log_if_needed(
-    state: &super::super::manager::GatewayAppState,
+    state: &crate::gateway::manager::GatewayAppState,
     trace_id: &str,
     cli_key: &str,
     forwarded_path: &str,
@@ -98,7 +98,7 @@ async fn enqueue_in_progress_request_log_if_needed(
 // ---------------------------------------------------------------------------
 
 pub(in crate::gateway) async fn proxy_impl(
-    state: super::super::manager::GatewayAppState,
+    state: crate::gateway::manager::GatewayAppState,
     cli_key: String,
     forwarded_path: String,
     req: Request<Body>,

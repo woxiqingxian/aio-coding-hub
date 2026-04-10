@@ -1,7 +1,7 @@
 //! Usage: Shared helpers to record SystemError attempts and apply failover decisions.
 
-use super::super::super::status_override;
-use super::super::super::{is_claude_count_tokens_request, provider_router};
+use crate::gateway::proxy::status_override;
+use crate::gateway::proxy::{is_claude_count_tokens_request, provider_router};
 use super::*;
 use crate::gateway::events::decision_chain as dc;
 
