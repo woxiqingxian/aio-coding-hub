@@ -29,6 +29,8 @@ import {
   type CliKey,
   type ProviderSummary,
 } from "../../services/providers/providers";
+import { gatewayStatus } from "../../services/gateway/gateway";
+import { settingsGet } from "../../services/settings/settings";
 import {
   createProviderEditorDialogSchema,
   type ProviderEditorDialogFormInput,
@@ -38,6 +40,7 @@ import { Button } from "../../ui/Button";
 import { Dialog } from "../../ui/Dialog";
 import { FormField } from "../../ui/FormField";
 import { Input } from "../../ui/Input";
+import { Select } from "../../ui/Select";
 import { Switch } from "../../ui/Switch";
 import { TabList } from "../../ui/TabList";
 import { normalizeBaseUrlRows } from "./baseUrl";
@@ -169,9 +172,25 @@ function deriveAuthMode(
   provider: ProviderSummary | null | undefined
 ): "api_key" | "oauth" | "cx2cc" {
   if (!provider) return "api_key";
-  if (provider.source_provider_id) return "cx2cc";
+  if (provider.bridge_type === "cx2cc" || provider.source_provider_id != null) return "cx2cc";
   if (provider.auth_mode === "oauth") return "oauth";
   return "api_key";
+}
+
+const CX2CC_GLOBAL_SOURCE_VALUE = "__codex_gateway__";
+const CX2CC_PROXY_TOKEN = "aio-coding-hub";
+
+function deriveCx2ccSourceValue(
+  source:
+    | Pick<ProviderSummary, "source_provider_id" | "bridge_type">
+    | Pick<ProviderEditorInitialValues, "source_provider_id" | "bridge_type">
+    | null
+    | undefined
+) {
+  if (!source) return "";
+  if (source.source_provider_id != null) return String(source.source_provider_id);
+  if (source.bridge_type === "cx2cc") return CX2CC_GLOBAL_SOURCE_VALUE;
+  return "";
 }
 
 export function ProviderEditorDialog(props: ProviderEditorDialogProps) {
@@ -209,8 +228,8 @@ export function ProviderEditorDialog(props: ProviderEditorDialogProps) {
     deriveAuthMode(editProvider)
   );
 
-  const [sourceProviderId, setSourceProviderId] = useState<number | null>(
-    editProvider?.source_provider_id ?? null
+  const [cx2ccSourceValue, setCx2ccSourceValue] = useState<string>(
+    deriveCx2ccSourceValue(editProvider)
   );
 
   const [oauthStatus, setOauthStatus] = useState<{
@@ -221,6 +240,13 @@ export function ProviderEditorDialog(props: ProviderEditorDialogProps) {
     has_refresh_token?: boolean;
   } | null>(null);
   const [oauthLoading, setOauthLoading] = useState(false);
+  const [cx2ccFallbackModels, setCx2ccFallbackModels] = useState<{
+    main: string;
+    haiku: string;
+    sonnet: string;
+    opus: string;
+  } | null>(null);
+  const [codexGatewayBaseOrigin, setCodexGatewayBaseOrigin] = useState<string | null>(null);
   const oauthStatusRequestSeqRef = useRef(0);
 
   const form = useForm<ProviderEditorDialogFormInput>({
@@ -239,6 +265,17 @@ export function ProviderEditorDialog(props: ProviderEditorDialogProps) {
   const apiKeyValue = watch("api_key");
   const costMultiplierValue = watch("cost_multiplier");
   const apiKeyDirty = Boolean(formState.dirtyFields.api_key);
+  const isCodexGatewaySource = cx2ccSourceValue === CX2CC_GLOBAL_SOURCE_VALUE;
+  const sourceProviderId =
+    cx2ccSourceValue && cx2ccSourceValue !== CX2CC_GLOBAL_SOURCE_VALUE
+      ? Number(cx2ccSourceValue)
+      : null;
+  const selectedCx2ccSourceProvider = sourceProviderId
+    ? (codexProviders.find((provider) => provider.id === sourceProviderId) ?? null)
+    : null;
+  const codexGatewayBaseUrl = codexGatewayBaseOrigin
+    ? `${codexGatewayBaseOrigin.replace(/\/$/, "")}/v1`
+    : "当前网关 /v1";
 
   const title =
     mode === "create"
@@ -278,7 +315,6 @@ export function ProviderEditorDialog(props: ProviderEditorDialogProps) {
     setSavedApiKey(null);
 
     if (mode === "create") {
-      const initialSourceProviderId = createInitialValues?.source_provider_id ?? null;
       setBaseUrlMode(createInitialValues?.base_url_mode ?? "order");
       setBaseUrlRows(buildBaseUrlRows(createInitialValues, newBaseUrlRow));
       setPingingAll(false);
@@ -286,9 +322,11 @@ export function ProviderEditorDialog(props: ProviderEditorDialogProps) {
       setTags(createInitialValues?.tags ?? []);
       setTagInput("");
       setStreamIdleTimeoutSeconds(valueOrEmpty(createInitialValues?.stream_idle_timeout_seconds));
-      setSourceProviderId(initialSourceProviderId);
+      setCx2ccSourceValue(deriveCx2ccSourceValue(createInitialValues));
       setAuthMode(
-        initialSourceProviderId != null ? "cx2cc" : (createInitialValues?.auth_mode ?? "api_key")
+        deriveCx2ccSourceValue(createInitialValues)
+          ? "cx2cc"
+          : (createInitialValues?.auth_mode ?? "api_key")
       );
       setOauthStatus(null);
       reset(buildFormValues(createInitialValues));
@@ -300,7 +338,7 @@ export function ProviderEditorDialog(props: ProviderEditorDialogProps) {
 
     const initialAuthMode = deriveAuthMode(snapshot);
     setAuthMode(initialAuthMode);
-    setSourceProviderId(snapshot.source_provider_id ?? null);
+    setCx2ccSourceValue(deriveCx2ccSourceValue(snapshot));
     setOauthStatus(null);
     setBaseUrlMode(snapshot.base_url_mode);
     setBaseUrlRows(snapshot.base_urls.map((url) => newBaseUrlRow(url)));
@@ -331,6 +369,52 @@ export function ProviderEditorDialog(props: ProviderEditorDialogProps) {
       apiKeyFetchPromiseRef.current = null;
     };
   }, [cliKey, createInitialValues, editingProviderId, mode, open, reset]);
+
+  useEffect(() => {
+    if (authMode !== "cx2cc") return;
+    const inheritedMultiplier = isCodexGatewaySource
+      ? "0"
+      : String(selectedCx2ccSourceProvider?.cost_multiplier ?? 1.0);
+    if (costMultiplierValue === inheritedMultiplier) return;
+    setValue("cost_multiplier", inheritedMultiplier, {
+      shouldDirty: true,
+      shouldTouch: false,
+      shouldValidate: false,
+    });
+  }, [authMode, costMultiplierValue, isCodexGatewaySource, selectedCx2ccSourceProvider, setValue]);
+
+  useEffect(() => {
+    if (!open || cliKey !== "claude") return;
+    let cancelled = false;
+
+    void Promise.all([settingsGet(), gatewayStatus()])
+      .then(([settings, status]) => {
+        if (cancelled) return;
+        if (settings) {
+          setCx2ccFallbackModels({
+            main: settings.cx2cc_fallback_model_main.trim(),
+            haiku: settings.cx2cc_fallback_model_haiku.trim(),
+            sonnet: settings.cx2cc_fallback_model_sonnet.trim(),
+            opus: settings.cx2cc_fallback_model_opus.trim(),
+          });
+          setCodexGatewayBaseOrigin(
+            status?.base_url?.trim() || `http://127.0.0.1:${settings.preferred_port}`
+          );
+          return;
+        }
+        setCx2ccFallbackModels(null);
+        setCodexGatewayBaseOrigin(status?.base_url?.trim() || null);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setCx2ccFallbackModels(null);
+        setCodexGatewayBaseOrigin(null);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [cliKey, open]);
 
   useEffect(() => {
     if (!open || mode !== "edit" || !editingProviderId || authMode !== "api_key") return;
@@ -561,8 +645,8 @@ export function ProviderEditorDialog(props: ProviderEditorDialogProps) {
       finalBaseUrls = [];
       finalBaseUrlMode = "order";
 
-      if (!sourceProviderId) {
-        toast("请选择源 Codex 供应商");
+      if (!cx2ccSourceValue) {
+        toast("请选择源 Codex 来源");
         return;
       }
     } else {
@@ -586,6 +670,12 @@ export function ProviderEditorDialog(props: ProviderEditorDialogProps) {
     try {
       const apiKeyToSave =
         authMode === "oauth" ? null : mode === "edit" && !apiKeyDirty ? "" : values.api_key;
+      const effectiveCostMultiplier =
+        isCx2cc && isCodexGatewaySource
+          ? 0
+          : isCx2cc && selectedCx2ccSourceProvider
+            ? selectedCx2ccSourceProvider.cost_multiplier
+            : values.cost_multiplier;
 
       const saved = await providerUpsert({
         ...(mode === "edit" ? { provider_id: props.provider.id } : {}),
@@ -596,7 +686,7 @@ export function ProviderEditorDialog(props: ProviderEditorDialogProps) {
         auth_mode: isCx2cc ? "api_key" : authMode,
         api_key: authMode === "oauth" || isCx2cc ? null : apiKeyToSave,
         enabled: values.enabled,
-        cost_multiplier: values.cost_multiplier,
+        cost_multiplier: effectiveCostMultiplier,
         limit_5h_usd: values.limit_5h_usd,
         limit_daily_usd: values.limit_daily_usd,
         daily_reset_mode: values.daily_reset_mode,
@@ -608,7 +698,7 @@ export function ProviderEditorDialog(props: ProviderEditorDialogProps) {
         note: values.note,
         stream_idle_timeout_seconds: parsedStreamIdleTimeoutSeconds,
         ...(cliKey === "claude" && authMode !== "oauth" ? { claude_models: claudeModels } : {}),
-        source_provider_id: isCx2cc ? sourceProviderId : null,
+        source_provider_id: isCx2cc && !isCodexGatewaySource ? sourceProviderId : null,
         bridge_type: isCx2cc ? "cx2cc" : null,
       });
 
@@ -679,51 +769,51 @@ export function ProviderEditorDialog(props: ProviderEditorDialogProps) {
   const supportsOAuth = cliKey === "codex" || cliKey === "gemini";
   const supportsCx2cc = cliKey === "claude";
 
-  const tagsAndNoteSection = (
-    <div className="grid gap-3 sm:grid-cols-2">
-      <FormField label="标签" hint="按 Enter 添加标签">
-        <div className="flex min-h-10 flex-wrap items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 shadow-sm dark:border-slate-600 dark:bg-slate-800 dark:shadow-none">
-          {tags.map((tag) => (
-            <span key={tag} className={tagBadgeClassName(tag)}>
-              {tag}
-              <button
-                type="button"
-                onClick={() => setTags((prev) => prev.filter((t) => t !== tag))}
-                className={tagRemoveButtonClassName(tag)}
-                disabled={saving}
-                aria-label={`移除标签 ${tag}`}
-              >
-                <X className="h-2.5 w-2.5" />
-              </button>
-            </span>
-          ))}
-          <input
-            type="text"
-            value={tagInput}
-            onChange={(e) => setTagInput(e.currentTarget.value)}
-            onKeyDown={(e) => {
-              if (e.key !== "Enter") return;
-              e.preventDefault();
-              const trimmed = tagInput.trim();
-              if (!trimmed) return;
-              if (tags.includes(trimmed)) {
-                setTagInput("");
-                return;
-              }
-              setTags((prev) => [...prev, trimmed]);
+  const tagsField = (
+    <FormField label="标签" hint="按 Enter 添加标签">
+      <div className="flex min-h-10 flex-wrap items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 shadow-sm dark:border-slate-600 dark:bg-slate-800 dark:shadow-none">
+        {tags.map((tag) => (
+          <span key={tag} className={tagBadgeClassName(tag)}>
+            {tag}
+            <button
+              type="button"
+              onClick={() => setTags((prev) => prev.filter((t) => t !== tag))}
+              className={tagRemoveButtonClassName(tag)}
+              disabled={saving}
+              aria-label={`移除标签 ${tag}`}
+            >
+              <X className="h-2.5 w-2.5" />
+            </button>
+          </span>
+        ))}
+        <input
+          type="text"
+          value={tagInput}
+          onChange={(e) => setTagInput(e.currentTarget.value)}
+          onKeyDown={(e) => {
+            if (e.key !== "Enter") return;
+            e.preventDefault();
+            const trimmed = tagInput.trim();
+            if (!trimmed) return;
+            if (tags.includes(trimmed)) {
               setTagInput("");
-            }}
-            placeholder={tags.length === 0 ? "输入标签后按 Enter" : ""}
-            className="min-w-[80px] flex-1 border-none bg-transparent text-sm outline-none placeholder:text-slate-400"
-            disabled={saving}
-          />
-        </div>
-      </FormField>
+              return;
+            }
+            setTags((prev) => [...prev, trimmed]);
+            setTagInput("");
+          }}
+          placeholder={tags.length === 0 ? "输入标签后按 Enter" : ""}
+          className="min-w-[80px] flex-1 border-none bg-transparent text-sm outline-none placeholder:text-slate-400"
+          disabled={saving}
+        />
+      </div>
+    </FormField>
+  );
 
-      <FormField label="备注" hint="供应商列表中显示">
-        <Input placeholder="可选备注信息" disabled={saving} {...register("note")} />
-      </FormField>
-    </div>
+  const noteField = (
+    <FormField label="备注">
+      <Input placeholder="可选备注信息" disabled={saving} {...register("note")} />
+    </FormField>
   );
 
   async function handleOAuthLogin() {
@@ -1074,51 +1164,138 @@ export function ProviderEditorDialog(props: ProviderEditorDialogProps) {
                 <Input placeholder="default" {...register("name")} />
               </FormField>
 
-              <FormField label="价格倍率">
-                <Input
-                  type="number"
-                  min="0"
-                  step="0.01"
-                  placeholder="1.0"
-                  {...register("cost_multiplier")}
-                />
-              </FormField>
+              {tagsField}
             </div>
 
-            <FormField label="源 Codex 供应商" hint="CX2CC 将复用此供应商的凭证和 Base URL">
-              <select
-                className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200"
-                value={sourceProviderId ?? ""}
+            {noteField}
+
+            <FormField label="源 Codex 来源">
+              <Select
+                value={cx2ccSourceValue}
                 onChange={(e) => {
-                  const val = e.target.value ? Number(e.target.value) : null;
-                  setSourceProviderId(val);
+                  setCx2ccSourceValue(e.target.value);
                 }}
                 disabled={saving}
+                className="w-full"
               >
-                <option value="">请选择 Codex 供应商…</option>
+                <option value="">请选择 Codex 来源…</option>
+                <option value={CX2CC_GLOBAL_SOURCE_VALUE}>
+                  当前 AIO 服务 Codex 网关（跟随当前分流）
+                </option>
                 {codexProviders
-                  .filter((p) => p.enabled && p.source_provider_id == null)
+                  .filter((p) => p.enabled && p.source_provider_id == null && p.bridge_type == null)
                   .map((p) => (
                     <option key={p.id} value={p.id}>
                       {p.name} ({p.auth_mode === "oauth" ? "OAuth" : "API Key"})
                     </option>
                   ))}
-              </select>
-              {(() => {
-                const selected = sourceProviderId
-                  ? (codexProviders.find((p) => p.id === sourceProviderId) ?? null)
-                  : null;
-                return selected ? (
-                  <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-                    已选择：{selected.name} —{" "}
-                    {selected.auth_mode === "oauth" ? "OAuth 认证" : "API Key 认证"}
-                    {selected.base_urls.length > 0 ? ` — ${selected.base_urls[0]}` : ""}
+              </Select>
+              {isCodexGatewaySource ? (
+                <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2.5 text-xs text-slate-500 dark:border-slate-700 dark:bg-slate-800/50 dark:text-slate-400">
+                  <p>
+                    已选择
+                    <span className="mx-1 font-medium text-slate-700 dark:text-slate-200">
+                      当前 AIO 服务 Codex 网关
+                    </span>
                   </p>
-                ) : null;
-              })()}
+                  <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-[11px] leading-5">
+                    <span>
+                      认证：
+                      <span className="ml-1 text-slate-700 dark:text-slate-200">App Token</span>
+                    </span>
+                    <span>
+                      价格倍率：
+                      <span className="ml-1 font-mono text-slate-700 dark:text-slate-200">
+                        免费
+                      </span>
+                    </span>
+                    <span className="min-w-0 max-w-full truncate" title={codexGatewayBaseUrl}>
+                      Base URL：
+                      <span className="ml-1 font-mono text-slate-700 dark:text-slate-200">
+                        {codexGatewayBaseUrl}
+                      </span>
+                    </span>
+                    <span>
+                      Token：
+                      <span className="ml-1 font-mono text-slate-700 dark:text-slate-200">
+                        {CX2CC_PROXY_TOKEN}
+                      </span>
+                    </span>
+                  </div>
+                  <p className="mt-1 text-[11px] leading-5">
+                    说明：转译后的请求会进入当前 AIO 服务 Codex 网关，再按当前 Codex 分流继续路由。
+                  </p>
+                  <p className="mt-1 text-[11px] leading-5">
+                    默认模型映射： 主模型
+                    <span className="mx-1 font-mono text-slate-700 dark:text-slate-200">
+                      {cx2ccFallbackModels?.main ?? "全局默认值"}
+                    </span>
+                    / Haiku
+                    <span className="mx-1 font-mono text-slate-700 dark:text-slate-200">
+                      {cx2ccFallbackModels?.haiku ?? "全局默认值"}
+                    </span>
+                    / Sonnet
+                    <span className="mx-1 font-mono text-slate-700 dark:text-slate-200">
+                      {cx2ccFallbackModels?.sonnet ?? "全局默认值"}
+                    </span>
+                    / Opus
+                    <span className="mx-1 font-mono text-slate-700 dark:text-slate-200">
+                      {cx2ccFallbackModels?.opus ?? "全局默认值"}
+                    </span>
+                  </p>
+                </div>
+              ) : selectedCx2ccSourceProvider ? (
+                <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2.5 text-xs text-slate-500 dark:border-slate-700 dark:bg-slate-800/50 dark:text-slate-400">
+                  <p>
+                    已选择
+                    <span className="mx-1 font-medium text-slate-700 dark:text-slate-200">
+                      {selectedCx2ccSourceProvider.name}
+                    </span>
+                  </p>
+                  <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-[11px] leading-5">
+                    <span>
+                      认证：
+                      <span className="ml-1 text-slate-700 dark:text-slate-200">
+                        {selectedCx2ccSourceProvider.auth_mode === "oauth" ? "OAuth" : "API Key"}
+                      </span>
+                    </span>
+                    <span>
+                      价格倍率：
+                      <span className="ml-1 font-mono text-slate-700 dark:text-slate-200">
+                        x{selectedCx2ccSourceProvider.cost_multiplier.toFixed(2)}
+                      </span>
+                    </span>
+                    <span
+                      className="min-w-0 max-w-full truncate"
+                      title={selectedCx2ccSourceProvider.base_urls[0] ?? "跟随网关默认路由"}
+                    >
+                      Base URL：
+                      <span className="ml-1 font-mono text-slate-700 dark:text-slate-200">
+                        {selectedCx2ccSourceProvider.base_urls[0] ?? "跟随网关默认路由"}
+                      </span>
+                    </span>
+                  </div>
+                  <p className="mt-1 text-[11px] leading-5">
+                    默认模型映射： 主模型
+                    <span className="mx-1 font-mono text-slate-700 dark:text-slate-200">
+                      {cx2ccFallbackModels?.main ?? "全局默认值"}
+                    </span>
+                    / Haiku
+                    <span className="mx-1 font-mono text-slate-700 dark:text-slate-200">
+                      {cx2ccFallbackModels?.haiku ?? "全局默认值"}
+                    </span>
+                    / Sonnet
+                    <span className="mx-1 font-mono text-slate-700 dark:text-slate-200">
+                      {cx2ccFallbackModels?.sonnet ?? "全局默认值"}
+                    </span>
+                    / Opus
+                    <span className="mx-1 font-mono text-slate-700 dark:text-slate-200">
+                      {cx2ccFallbackModels?.opus ?? "全局默认值"}
+                    </span>
+                  </p>
+                </div>
+              ) : null}
             </FormField>
-
-            {tagsAndNoteSection}
           </>
         ) : (
           /* ── API Key mode: full form ── */
@@ -1128,49 +1305,10 @@ export function ProviderEditorDialog(props: ProviderEditorDialogProps) {
                 <Input placeholder="default" {...register("name")} />
               </FormField>
 
-              <FormField label="标签" hint="按 Enter 添加标签">
-                <div className="flex min-h-10 flex-wrap items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 shadow-sm dark:border-slate-600 dark:bg-slate-800 dark:shadow-none">
-                  {tags.map((tag) => (
-                    <span key={tag} className={tagBadgeClassName(tag)}>
-                      {tag}
-                      <button
-                        type="button"
-                        onClick={() => setTags((prev) => prev.filter((t) => t !== tag))}
-                        className={tagRemoveButtonClassName(tag)}
-                        disabled={saving}
-                        aria-label={`移除标签 ${tag}`}
-                      >
-                        <X className="h-2.5 w-2.5" />
-                      </button>
-                    </span>
-                  ))}
-                  <input
-                    type="text"
-                    value={tagInput}
-                    onChange={(e) => setTagInput(e.currentTarget.value)}
-                    onKeyDown={(e) => {
-                      if (e.key !== "Enter") return;
-                      e.preventDefault();
-                      const trimmed = tagInput.trim();
-                      if (!trimmed) return;
-                      if (tags.includes(trimmed)) {
-                        setTagInput("");
-                        return;
-                      }
-                      setTags((prev) => [...prev, trimmed]);
-                      setTagInput("");
-                    }}
-                    placeholder={tags.length === 0 ? "输入标签后按 Enter" : ""}
-                    className="min-w-[80px] flex-1 border-none bg-transparent text-sm outline-none placeholder:text-slate-400"
-                    disabled={saving}
-                  />
-                </div>
-              </FormField>
+              {tagsField}
             </div>
 
-            <FormField label="备注">
-              <Input placeholder="可选备注信息" disabled={saving} {...register("note")} />
-            </FormField>
+            {noteField}
 
             <FormField label="Base URLs">
               <BaseUrlEditor

@@ -377,6 +377,161 @@ describe("pages/providers/ProviderEditorDialog", () => {
     await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false));
   });
 
+  it("inherits cost multiplier from selected codex source for cx2cc", async () => {
+    vi.mocked(providerUpsert).mockResolvedValue({
+      id: 12,
+      cli_key: "claude",
+      name: "Bridge Provider",
+      base_urls: [],
+      base_url_mode: "order",
+      enabled: true,
+      cost_multiplier: 1.8,
+      claude_models: {},
+      source_provider_id: 7,
+      bridge_type: "cx2cc",
+    } as any);
+
+    render(
+      <ProviderEditorDialog
+        mode="create"
+        open={true}
+        cliKey="claude"
+        onSaved={vi.fn()}
+        onOpenChange={vi.fn()}
+        codexProviders={[
+          makeProvider({
+            id: 7,
+            cli_key: "codex",
+            name: "Codex Source",
+            auth_mode: "api_key",
+            cost_multiplier: 1.8,
+            base_urls: ["https://codex.example.com/v1"],
+          }),
+        ]}
+      />
+    );
+
+    const dialog = within(screen.getByRole("dialog"));
+    fireEvent.click(dialog.getByRole("tab", { name: "CX2CC 转译" }));
+    fireEvent.change(dialog.getByPlaceholderText("default"), {
+      target: { value: "Bridge Provider" },
+    });
+    fireEvent.change(dialog.getByRole("combobox"), { target: { value: "7" } });
+
+    await waitFor(() => {
+      expect(dialog.getByText("Codex Source")).toBeInTheDocument();
+      expect(dialog.getByText("API Key")).toBeInTheDocument();
+      expect(dialog.getByText("x1.80")).toBeInTheDocument();
+      expect(dialog.getByText("https://codex.example.com/v1")).toBeInTheDocument();
+      expect(dialog.getByText(/默认模型映射：/)).toBeInTheDocument();
+      expect(dialog.getAllByText("gpt-5.4").length).toBeGreaterThanOrEqual(1);
+    });
+
+    fireEvent.click(dialog.getByRole("button", { name: "保存" }));
+
+    await waitFor(() =>
+      expect(vi.mocked(providerUpsert)).toHaveBeenCalledWith(
+        expect.objectContaining({
+          name: "Bridge Provider",
+          cost_multiplier: 1.8,
+          source_provider_id: 7,
+          bridge_type: "cx2cc",
+        })
+      )
+    );
+  });
+
+  it("supports using the whole codex gateway as cx2cc source", async () => {
+    vi.mocked(providerUpsert).mockResolvedValue({
+      id: 13,
+      cli_key: "claude",
+      name: "Bridge Gateway Provider",
+      base_urls: [],
+      base_url_mode: "order",
+      enabled: true,
+      cost_multiplier: 0,
+      claude_models: {},
+      source_provider_id: null,
+      bridge_type: "cx2cc",
+    } as any);
+
+    render(
+      <ProviderEditorDialog
+        mode="create"
+        open={true}
+        cliKey="claude"
+        onSaved={vi.fn()}
+        onOpenChange={vi.fn()}
+      />
+    );
+
+    const dialog = within(screen.getByRole("dialog"));
+    fireEvent.click(dialog.getByRole("tab", { name: "CX2CC 转译" }));
+    fireEvent.change(dialog.getByPlaceholderText("default"), {
+      target: { value: "Bridge Gateway Provider" },
+    });
+    fireEvent.change(dialog.getByRole("combobox"), {
+      target: { value: "__codex_gateway__" },
+    });
+
+    await waitFor(() => {
+      expect(dialog.getByText("当前 AIO 服务 Codex 网关")).toBeInTheDocument();
+      expect(dialog.getByText("App Token")).toBeInTheDocument();
+      expect(dialog.getAllByText("免费").length).toBeGreaterThanOrEqual(1);
+      expect(dialog.getByText("http://127.0.0.1:37123/v1")).toBeInTheDocument();
+      expect(dialog.getByText("aio-coding-hub")).toBeInTheDocument();
+      expect(dialog.getByText(/转译后的请求会进入当前 AIO 服务 Codex 网关/)).toBeInTheDocument();
+    });
+
+    fireEvent.click(dialog.getByRole("button", { name: "保存" }));
+
+    await waitFor(() =>
+      expect(vi.mocked(providerUpsert)).toHaveBeenCalledWith(
+        expect.objectContaining({
+          name: "Bridge Gateway Provider",
+          cost_multiplier: 0,
+          source_provider_id: null,
+          bridge_type: "cx2cc",
+        })
+      )
+    );
+  });
+
+  it("resets cost multiplier to default when cx2cc source is not selected", async () => {
+    render(
+      <ProviderEditorDialog
+        mode="create"
+        open={true}
+        cliKey="claude"
+        onSaved={vi.fn()}
+        onOpenChange={vi.fn()}
+        codexProviders={[
+          makeProvider({
+            id: 7,
+            cli_key: "codex",
+            name: "Codex Source",
+            auth_mode: "api_key",
+            cost_multiplier: 1.8,
+          }),
+        ]}
+      />
+    );
+
+    const dialog = within(screen.getByRole("dialog"));
+    fireEvent.change(dialog.getByPlaceholderText("1.0"), { target: { value: "2.5" } });
+    fireEvent.click(dialog.getByRole("tab", { name: "CX2CC 转译" }));
+
+    await waitFor(() => {
+      expect(
+        dialog.queryByText(/CX2CC 会复用该供应商的认证信息、Base URL 和价格倍率。/)
+      ).not.toBeInTheDocument();
+    });
+
+    fireEvent.click(dialog.getByRole("tab", { name: "API 密钥" }));
+
+    expect((dialog.getByPlaceholderText("1.0") as HTMLInputElement).value).toBe("1");
+  });
+
   it("syncs haiku sonnet opus with main model by default", () => {
     render(
       <ProviderEditorDialog

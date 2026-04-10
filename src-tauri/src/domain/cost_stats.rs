@@ -883,6 +883,18 @@ LIMIT ?6
                 1.0
             };
 
+            if multiplier == 0.0 {
+                let changed = stmt_update
+                    .execute(params![0_i64, id])
+                    .map_err(|e| db_err!("failed to update zero cost_usd_femto: {e}"))?;
+                if changed > 0 {
+                    report.updated = report.updated.saturating_add(1);
+                } else {
+                    report.skipped_other = report.skipped_other.saturating_add(1);
+                }
+                continue;
+            }
+
             let cost_usd_femto = cost::calculate_cost_usd_femto(
                 &usage,
                 &price_json,

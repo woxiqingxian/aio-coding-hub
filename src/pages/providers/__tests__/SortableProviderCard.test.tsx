@@ -276,21 +276,70 @@ describe("pages/providers/SortableProviderCard", () => {
     expect(freeTag.className).toContain("text-emerald-700");
   });
 
-  it("keeps cx2cc source label without the top translation badge", () => {
+  it("renders cx2cc source summary for a concrete codex provider", () => {
     renderCard(
       {
         source_provider_id: 7,
+        cost_multiplier: 1.8,
       },
       {
         sourceProviderName: "Lisa",
+        sourceProvider: makeProvider({
+          id: 7,
+          cli_key: "codex",
+          name: "Lisa",
+          auth_mode: "oauth",
+          base_urls: ["https://codex.example.com/v1"],
+        }),
       }
     );
 
-    expect(screen.getAllByText((_, el) => el?.textContent === "源: Lisa").length).toBeGreaterThan(
+    expect(screen.getByText("CX2CC")).toBeInTheDocument();
+    expect(screen.getByText("x1.80")).toBeInTheDocument();
+    expect(screen.getAllByText((_, el) => el?.textContent === "来源: Lisa").length).toBeGreaterThan(
       0
     );
+    expect(screen.getByText("https://codex.example.com/v1")).toBeInTheDocument();
     expect(screen.queryByText("CX2CC 转译")).not.toBeInTheDocument();
+  });
+
+  it("renders cx2cc summary for the current aio codex gateway", () => {
+    renderCard({
+      bridge_type: "cx2cc",
+      source_provider_id: null,
+      cost_multiplier: 0,
+      tags: ["免费"],
+    });
+
     expect(screen.getByText("CX2CC")).toBeInTheDocument();
+    expect(screen.getByText("免费")).toBeInTheDocument();
+    expect(
+      screen.getAllByText((_, el) => el?.textContent === "来源: 当前 AIO 服务 Codex 网关").length
+    ).toBeGreaterThan(0);
+    expect(screen.getByText("跟随当前 Codex 分流")).toBeInTheDocument();
+  });
+
+  it("shows only one 免费 label for zero-cost cx2cc cards", () => {
+    renderCard({
+      bridge_type: "cx2cc",
+      source_provider_id: null,
+      cost_multiplier: 0,
+      tags: ["免费", "bridge"],
+    });
+
+    expect(screen.getAllByText("免费")).toHaveLength(1);
+    expect(screen.getByText("bridge")).toBeInTheDocument();
+  });
+
+  it("does not render a separate cx2cc free price badge", () => {
+    renderCard({
+      bridge_type: "cx2cc",
+      source_provider_id: null,
+      cost_multiplier: 0,
+      tags: [],
+    });
+
+    expect(screen.queryByText("免费")).not.toBeInTheDocument();
   });
 
   it("renders ping mode label", () => {

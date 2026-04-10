@@ -73,6 +73,10 @@ export function ProvidersView({ activeCli }: ProvidersViewProps) {
   );
   const codexProvidersQuery = useProvidersListQuery("codex", { enabled: activeCli === "claude" });
   const providersLoading = providersQuery.isFetching;
+  const sourceProvidersById = useMemo(
+    () => Object.fromEntries((codexProvidersQuery.data ?? []).map((p) => [p.id, p])),
+    [codexProvidersQuery.data]
+  );
   const sourceProviderNamesById = useMemo(
     () => Object.fromEntries((codexProvidersQuery.data ?? []).map((p) => [p.id, p.name])),
     [codexProvidersQuery.data]
@@ -598,7 +602,14 @@ export function ProvidersView({ activeCli }: ProvidersViewProps) {
                       sourceProviderName={
                         provider.source_provider_id != null
                           ? (sourceProviderNamesById[provider.source_provider_id] ?? null)
-                          : undefined
+                          : provider.bridge_type === "cx2cc"
+                            ? "当前 AIO 服务 Codex 网关"
+                            : undefined
+                      }
+                      sourceProvider={
+                        provider.source_provider_id != null
+                          ? (sourceProvidersById[provider.source_provider_id] ?? null)
+                          : null
                       }
                       circuit={circuitByProviderId[provider.id] ?? null}
                       circuitResetting={Boolean(circuitResetting[provider.id]) || circuitLoading}

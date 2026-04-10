@@ -104,7 +104,9 @@ pub(super) async fn prepare_provider(
             None => return PreparationOutcome::Skipped,
         };
 
-    let mut effective_credential = if provider.source_provider_id.is_some() {
+    let is_cx2cc_bridge = provider.is_cx2cc_bridge();
+
+    let mut effective_credential = if is_cx2cc_bridge {
         String::new()
     } else {
         match resolve_effective_credential(&input.state, &input.cli_key, provider).await {
@@ -212,13 +214,13 @@ pub(super) async fn prepare_provider(
     let mut cx2cc_active = false;
     let mut cx2cc_source: Option<(crate::providers::ProviderForGateway, String)> = None;
     let mut cx2cc_codex_session_id: Option<String> = None;
-    if let Some(source_id) = provider.source_provider_id {
+    if is_cx2cc_bridge {
         let outcome = cx2cc_preparation::prepare(cx2cc_preparation::Cx2ccPreparationInput {
             ctx,
             input,
             provider_id,
             provider_name_base: &provider_name_base,
-            source_id,
+            source_id: provider.source_provider_id,
             anthropic_stream_requested,
             upstream_body_bytes,
             use_codex_chatgpt_backend,

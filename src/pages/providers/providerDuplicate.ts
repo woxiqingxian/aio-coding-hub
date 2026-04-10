@@ -57,7 +57,7 @@ export function buildDuplicatedProviderInitialValues(
   existingProviders: ProviderSummary[],
   apiKey: string | null
 ): ProviderEditorInitialValues {
-  const isBridge = provider.source_provider_id != null;
+  const isBridge = provider.source_provider_id != null || provider.bridge_type === "cx2cc";
   return {
     name: buildDuplicatedProviderName(provider.name, existingProviders),
     api_key: !isBridge && provider.auth_mode === "api_key" ? (apiKey ?? "") : "",

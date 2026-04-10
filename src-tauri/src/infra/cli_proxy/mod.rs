@@ -13,7 +13,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 const MANIFEST_SCHEMA_VERSION: u32 = 1;
 const MANAGED_BY: &str = "aio-coding-hub";
-const PLACEHOLDER_KEY: &str = "aio-coding-hub";
+pub(crate) const PLACEHOLDER_KEY: &str = "aio-coding-hub";
 
 static TRACE_COUNTER: AtomicU64 = AtomicU64::new(1);
 

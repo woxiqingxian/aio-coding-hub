@@ -6,7 +6,10 @@
 
 use super::provider_iterator::SkipReason;
 use super::*;
+use crate::app::app_state::GatewayState;
 use crate::gateway::proxy::protocol_bridge::{self, BridgeContext};
+use crate::shared::mutex_ext::MutexExt;
+use tauri::Manager;
 
 /// All CX2CC-related state produced by preparation.
 pub(super) struct Cx2ccResult {
@@ -28,7 +31,7 @@ pub(super) struct Cx2ccPreparationInput<'a> {
     pub(super) input: &'a RequestContext,
     pub(super) provider_id: i64,
     pub(super) provider_name_base: &'a str,
-    pub(super) source_id: i64,
+    pub(super) source_id: Option<i64>,
     pub(super) anthropic_stream_requested: bool,
     pub(super) upstream_body_bytes: Bytes,
     pub(super) use_codex_chatgpt_backend: bool,
@@ -42,44 +45,57 @@ pub(super) enum Cx2ccOutcome {
 
 /// Prepare CX2CC translation for a source-provider-backed bridge provider.
 pub(super) async fn prepare(args: Cx2ccPreparationInput<'_>) -> Cx2ccOutcome {
-    let source_result =
-        crate::providers::get_source_provider_for_gateway(&args.input.state.db, args.source_id);
+    let (
+        source,
+        source_cli_key,
+        source_provider_name,
+        source_cred,
+        source_provider_base_url,
+        mut use_codex_chatgpt_backend,
+        mut codex_chatgpt_account_id,
+    ) = if let Some(source_id) = args.source_id {
+        let source_result =
+            crate::providers::get_source_provider_for_gateway(&args.input.state.db, source_id);
 
-    let (source, source_cli_key) = match source_result {
-        Ok(pair) => pair,
-        Err(err) => {
-            let msg = format!(
-                "[CX2CC] source provider not found: {err} (provider={}, source_id={})",
-                args.provider_name_base, args.source_id
-            );
-            tracing::warn!(
-                trace_id = %args.input.trace_id,
-                provider_id = args.provider_id,
-                source_provider_id = args.source_id,
-                "cx2cc: source provider not found: {err}"
-            );
-            emit_gateway_log(&args.input.state.app, "warn", "CX2CC_SOURCE_NOT_FOUND", msg);
-            return Cx2ccOutcome::Skipped(SkipReason {
-                error_category: "config",
-                error_code: GatewayErrorCode::InternalError.as_str(),
-                reason: format!("cx2cc source provider not found: {err}"),
-            });
-        }
-    };
-
-    // Resolve source provider credential.
-    let source_cred =
-        match resolve_effective_credential(&args.input.state, &source_cli_key, &source).await {
-            Ok(cred) => cred,
+        let (source, source_cli_key) = match source_result {
+            Ok(pair) => pair,
             Err(err) => {
                 let msg = format!(
-                "[CX2CC] source credential resolution failed: {err} (provider={}, source_id={})",
-                args.provider_name_base, args.source_id
-            );
+                    "[CX2CC] source provider not found: {err} (provider={}, source_id={})",
+                    args.provider_name_base, source_id
+                );
                 tracing::warn!(
                     trace_id = %args.input.trace_id,
                     provider_id = args.provider_id,
-                    source_provider_id = args.source_id,
+                    source_provider_id = source_id,
+                    "cx2cc: source provider not found: {err}"
+                );
+                emit_gateway_log(&args.input.state.app, "warn", "CX2CC_SOURCE_NOT_FOUND", msg);
+                return Cx2ccOutcome::Skipped(SkipReason {
+                    error_category: "config",
+                    error_code: GatewayErrorCode::InternalError.as_str(),
+                    reason: format!("cx2cc source provider not found: {err}"),
+                });
+            }
+        };
+
+        let source_cred = match resolve_effective_credential(
+            &args.input.state,
+            &source_cli_key,
+            &source,
+        )
+        .await
+        {
+            Ok(cred) => cred,
+            Err(err) => {
+                let msg = format!(
+                        "[CX2CC] source credential resolution failed: {err} (provider={}, source_id={})",
+                        args.provider_name_base, source_id
+                    );
+                tracing::warn!(
+                    trace_id = %args.input.trace_id,
+                    provider_id = args.provider_id,
+                    source_provider_id = source_id,
                     "cx2cc: source provider credential resolution failed: {err}"
                 );
                 emit_gateway_log(
@@ -95,6 +111,75 @@ pub(super) async fn prepare(args: Cx2ccPreparationInput<'_>) -> Cx2ccOutcome {
                 });
             }
         };
+
+        let provider_base_url_base = match select_provider_base_url_for_request(
+            &args.input.state,
+            &source,
+            &source_cli_key,
+            args.input.provider_base_url_ping_cache_ttl_seconds,
+        )
+        .await
+        {
+            Ok(url) => url,
+            Err(err) => {
+                let msg = format!(
+                    "[CX2CC] source base_url resolution failed: {err} (provider={}, source_id={})",
+                    args.provider_name_base, source_id
+                );
+                tracing::warn!(
+                    trace_id = %args.input.trace_id,
+                    provider_id = args.provider_id,
+                    source_provider_id = source_id,
+                    "cx2cc: source provider base_url resolution failed: {err}"
+                );
+                emit_gateway_log(&args.input.state.app, "warn", "CX2CC_BASE_URL_FAILED", msg);
+                return Cx2ccOutcome::Skipped(SkipReason {
+                    error_category: "translation",
+                    error_code: GatewayErrorCode::InternalError.as_str(),
+                    reason: format!("cx2cc source base_url failed: {err}"),
+                });
+            }
+        };
+
+        let source_provider_name = if source.name.trim().is_empty() {
+            format!("Provider #{}", source.id)
+        } else {
+            source.name.clone()
+        };
+
+        (
+            Some(source),
+            source_cli_key,
+            source_provider_name,
+            source_cred,
+            provider_base_url_base,
+            args.use_codex_chatgpt_backend,
+            args.codex_chatgpt_account_id.clone(),
+        )
+    } else {
+        let state = args.input.state.app.state::<GatewayState>();
+        let manager = state.0.lock_or_recover();
+        let gateway_base_url = manager.status().base_url;
+        drop(manager);
+
+        let Some(gateway_base_url) = gateway_base_url else {
+            return Cx2ccOutcome::Skipped(SkipReason {
+                error_category: "config",
+                error_code: GatewayErrorCode::InternalError.as_str(),
+                reason: "cx2cc local codex gateway base_url missing".to_string(),
+            });
+        };
+
+        (
+            None,
+            "codex".to_string(),
+            "Codex".to_string(),
+            crate::infra::cli_proxy::PLACEHOLDER_KEY.to_string(),
+            format!("{}/v1", gateway_base_url.trim_end_matches('/')),
+            false,
+            None,
+        )
+    };
 
     // Translate request via protocol bridge (IR path).
     let body_val: serde_json::Value =
@@ -156,35 +241,7 @@ pub(super) async fn prepare(args: Cx2ccPreparationInput<'_>) -> Cx2ccOutcome {
     let upstream_query = None;
     let mut strip_request_content_encoding = true;
 
-    // Override base URL with source provider.
-    let provider_base_url_base = match select_provider_base_url_for_request(
-        &args.input.state,
-        &source,
-        &source_cli_key,
-        args.input.provider_base_url_ping_cache_ttl_seconds,
-    )
-    .await
-    {
-        Ok(url) => url,
-        Err(err) => {
-            let msg = format!(
-                "[CX2CC] source base_url resolution failed: {err} (provider={}, source_id={})",
-                args.provider_name_base, args.source_id
-            );
-            tracing::warn!(
-                trace_id = %args.input.trace_id,
-                provider_id = args.provider_id,
-                source_provider_id = args.source_id,
-                "cx2cc: source provider base_url resolution failed: {err}"
-            );
-            emit_gateway_log(&args.input.state.app, "warn", "CX2CC_BASE_URL_FAILED", msg);
-            return Cx2ccOutcome::Skipped(SkipReason {
-                error_category: "translation",
-                error_code: GatewayErrorCode::InternalError.as_str(),
-                reason: format!("cx2cc source base_url failed: {err}"),
-            });
-        }
-    };
+    let provider_base_url_base = source_provider_base_url;
 
     let cx2cc_codex_session_id = codex_session_id_completion::apply_if_needed(
         codex_session_id_completion::ApplyCodexSessionIdCompletionInput {
@@ -199,29 +256,22 @@ pub(super) async fn prepare(args: Cx2ccPreparationInput<'_>) -> Cx2ccOutcome {
     );
 
     // Re-detect Codex ChatGPT backend using source provider.
-    let mut use_codex_chatgpt_backend = args.use_codex_chatgpt_backend;
-    let mut codex_chatgpt_account_id = args.codex_chatgpt_account_id;
-    let cx2cc_is_chatgpt =
-        is_codex_chatgpt_backend(&source_cli_key, &source, &provider_base_url_base);
-    if cx2cc_is_chatgpt {
-        let details = crate::providers::get_oauth_details(&args.input.state.db, source.id).ok();
-        codex_chatgpt_account_id = details.and_then(|d| {
-            parse_codex_chatgpt_account_id(d.oauth_id_token.as_deref())
-                .or_else(|| parse_codex_chatgpt_account_id(Some(&d.oauth_access_token)))
-        });
-        use_codex_chatgpt_backend = true;
+    if let Some(source) = source.as_ref() {
+        let cx2cc_is_chatgpt =
+            is_codex_chatgpt_backend(&source_cli_key, source, &provider_base_url_base);
+        if cx2cc_is_chatgpt {
+            let details = crate::providers::get_oauth_details(&args.input.state.db, source.id).ok();
+            codex_chatgpt_account_id = details.and_then(|d| {
+                parse_codex_chatgpt_account_id(d.oauth_id_token.as_deref())
+                    .or_else(|| parse_codex_chatgpt_account_id(Some(&d.oauth_access_token)))
+            });
+            use_codex_chatgpt_backend = true;
+        }
     }
-
-    let source_provider_name = if source.name.trim().is_empty() {
-        format!("Provider #{}", source.id)
-    } else {
-        source.name.clone()
-    };
 
     tracing::info!(
         trace_id = %args.input.trace_id,
         provider_id = args.provider_id,
-        source_provider_id = args.source_id,
         openai_model = %openai_model,
         "cx2cc: request translated Anthropic -> OpenAI Responses API"
     );
@@ -275,7 +325,7 @@ pub(super) async fn prepare(args: Cx2ccPreparationInput<'_>) -> Cx2ccOutcome {
 
     Cx2ccOutcome::Ready(Box::new(Cx2ccResult {
         cx2cc_active: true,
-        cx2cc_source: Some((source.clone(), source_cli_key.clone())),
+        cx2cc_source: source.map(|provider| (provider, source_cli_key.clone())),
         cx2cc_codex_session_id,
         effective_credential: source_cred,
         provider_base_url_base,

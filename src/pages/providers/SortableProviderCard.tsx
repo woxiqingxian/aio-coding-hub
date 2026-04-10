@@ -103,6 +103,7 @@ function renderProviderNote(note: string) {
 export type SortableProviderCardProps = {
   provider: ProviderSummary;
   sourceProviderName?: string | null;
+  sourceProvider?: ProviderSummary | null;
   circuit: GatewayProviderCircuitStatus | null;
   circuitResetting: boolean;
   onToggleEnabled: (provider: ProviderSummary) => void;
@@ -119,6 +120,7 @@ export type SortableProviderCardProps = {
 export const SortableProviderCard = memo(function SortableProviderCard({
   provider,
   sourceProviderName = null,
+  sourceProvider = null,
   circuit,
   circuitResetting,
   onToggleEnabled,
@@ -162,6 +164,8 @@ export const SortableProviderCard = memo(function SortableProviderCard({
   const circuitState = useMemo(() => getGatewayCircuitDerivedState(circuit), [circuit]);
   const { isUnavailable, unavailableUntil } = circuitState;
   const isOAuth = provider.auth_mode === "oauth";
+  const isCx2cc = provider.source_provider_id != null || provider.bridge_type === "cx2cc";
+  const isCx2ccGateway = provider.bridge_type === "cx2cc" && provider.source_provider_id == null;
   const [apiKeyDetailsVisible, setApiKeyDetailsVisible] = useState(false);
   const [oauthLimits, setOauthLimits] = useState<OAuthLimitsResult | null>(
     () => oauthLimitsCache.get(provider.id) ?? null
@@ -178,6 +182,16 @@ export const SortableProviderCard = memo(function SortableProviderCard({
     unavailableUntil != null ? Math.max(0, unavailableUntil - nowUnix) : null;
   const unavailableCountdown =
     unavailableRemaining != null ? formatCountdownSeconds(unavailableRemaining) : null;
+  const cx2ccSourceName =
+    sourceProviderName ??
+    sourceProvider?.name ??
+    (provider.source_provider_id != null
+      ? `#${provider.source_provider_id}`
+      : "当前 AIO 服务 Codex 网关");
+  const cx2ccRouteLabel = isCx2ccGateway
+    ? "跟随当前 Codex 分流"
+    : (sourceProvider?.base_urls[0] ?? "跟随网关默认路由");
+  const visibleTags = provider.tags ?? [];
 
   // OAuth 限制重置倒计时
   const limitsResetCountdown = useMemo(() => {
@@ -319,7 +333,7 @@ export const SortableProviderCard = memo(function SortableProviderCard({
                   <RefreshCw className={cn("h-2.5 w-2.5", limitsLoading && "animate-spin")} />
                   OAuth
                 </button>
-              ) : provider.source_provider_id != null ? (
+              ) : isCx2cc ? (
                 <span
                   className="inline-flex w-16 shrink-0 items-center justify-center rounded-full px-2 py-0.5 font-mono text-[10px] bg-violet-50 text-violet-700 dark:bg-violet-900/30 dark:text-violet-400"
                   title="CX2CC 转译模式"
@@ -344,6 +358,17 @@ export const SortableProviderCard = memo(function SortableProviderCard({
                   </span>
                 </>
               )}
+              {isCx2cc && provider.cost_multiplier !== 0 ? (
+                <span
+                  className={cn(
+                    "shrink-0 rounded-full px-2 py-0.5 font-mono text-[10px]",
+                    "bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400"
+                  )}
+                  title={`价格倍率: x${provider.cost_multiplier.toFixed(2)}`}
+                >
+                  x{provider.cost_multiplier.toFixed(2)}
+                </span>
+              ) : null}
               {provider.cli_key === "claude" && hasClaudeModels ? (
                 <span
                   className="shrink-0 rounded-full bg-sky-50 px-2 py-0.5 font-mono text-[10px] text-sky-700 dark:bg-sky-900/30 dark:text-sky-400"
@@ -363,7 +388,7 @@ export const SortableProviderCard = memo(function SortableProviderCard({
                   限额
                 </span>
               ) : null}
-              {(provider.tags ?? []).map((tag) => (
+              {visibleTags.map((tag) => (
                 <span key={tag} className={providerTagClassName(tag)} title={`标签: ${tag}`}>
                   {tag}
                 </span>
@@ -413,13 +438,21 @@ export const SortableProviderCard = memo(function SortableProviderCard({
                     </span>
                   ) : null}
                 </>
-              ) : provider.source_provider_id != null ? (
-                <span
-                  className="truncate font-mono text-xs text-violet-500 dark:text-violet-400 cursor-default"
-                  title={`源 Codex 供应商: ${sourceProviderName ?? `#${provider.source_provider_id}`}`}
-                >
-                  源: {sourceProviderName ?? `#${provider.source_provider_id}`}
-                </span>
+              ) : isCx2cc ? (
+                <>
+                  <span
+                    className="truncate font-mono text-xs text-violet-500 dark:text-violet-400 cursor-default"
+                    title={`来源: ${cx2ccSourceName}`}
+                  >
+                    来源: {cx2ccSourceName}
+                  </span>
+                  <span
+                    className="truncate font-mono text-xs text-slate-500 dark:text-slate-400 cursor-default"
+                    title={cx2ccRouteLabel}
+                  >
+                    {cx2ccRouteLabel}
+                  </span>
+                </>
               ) : apiKeyDetailsVisible ? (
                 <span
                   className="truncate font-mono text-xs text-slate-500 dark:text-slate-400 cursor-default"
