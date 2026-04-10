@@ -15,9 +15,7 @@ impl BodyReaderMiddleware {
     /// Reads the request body into `ctx.body_bytes` and parses introspection JSON.
     ///
     /// Also strips the `x-aio-provider-id` header (already consumed as `forced_provider_id`).
-    pub(in crate::gateway::proxy::handler) async fn run(
-        mut ctx: ProxyContext,
-    ) -> MiddlewareAction {
+    pub(in crate::gateway::proxy::handler) async fn run(mut ctx: ProxyContext) -> MiddlewareAction {
         let body = ctx
             .request_body
             .take()
@@ -29,12 +27,8 @@ impl BodyReaderMiddleware {
                 ctx.body_bytes = bytes;
             }
             Err(err) => {
-                ctx.observe_request = compute_observe_request(
-                    &ctx.cli_key,
-                    &ctx.forwarded_path,
-                    &ctx.headers,
-                    None,
-                );
+                ctx.observe_request =
+                    compute_observe_request(&ctx.cli_key, &ctx.forwarded_path, &ctx.headers, None);
                 let contract = early_error_contract(EarlyErrorKind::BodyTooLarge);
                 let log_ctx = build_early_error_log_ctx(&ctx);
 

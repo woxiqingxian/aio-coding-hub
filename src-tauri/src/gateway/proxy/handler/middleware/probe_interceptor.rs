@@ -18,8 +18,7 @@ impl ProbeInterceptorMiddleware {
             return MiddlewareAction::Continue(Box::new(ctx));
         }
 
-        let mut resp =
-            (StatusCode::OK, Json(build_claude_probe_response_body())).into_response();
+        let mut resp = (StatusCode::OK, Json(build_claude_probe_response_body())).into_response();
         resp.headers_mut().insert(
             header::CONTENT_TYPE,
             HeaderValue::from_static("application/json; charset=utf-8"),

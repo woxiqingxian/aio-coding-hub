@@ -2,8 +2,8 @@
 //!
 //! Encapsulates all per-provider preparation that runs before the retry loop.
 
-use super::*;
 use super::provider_checks;
+use super::*;
 use crate::gateway::proxy::gemini_oauth::GeminiOAuthResponseMode;
 
 /// All mutable state accumulated by the provider preparation phase that the
@@ -23,8 +23,7 @@ pub(super) struct PreparedProvider {
     pub(super) upstream_query: Option<String>,
     pub(super) upstream_body_bytes: Bytes,
     pub(super) strip_request_content_encoding: bool,
-    pub(super) gemini_oauth_response_mode:
-        Option<GeminiOAuthResponseMode>,
+    pub(super) gemini_oauth_response_mode: Option<GeminiOAuthResponseMode>,
     pub(super) use_codex_chatgpt_backend: bool,
     pub(super) codex_chatgpt_account_id: Option<String>,
     pub(super) cx2cc_active: bool,
@@ -99,12 +98,11 @@ pub(super) async fn prepare_provider(
         provider_name_base: &provider_name_base,
         provider_base_url_display: &provider_base_url_display,
     };
-    let gate_allow = match provider_checks::run_gates(
-        ctx, input, provider, &identity, counters, attempts,
-    ) {
-        Some(allow) => allow,
-        None => return PreparationOutcome::Skipped,
-    };
+    let gate_allow =
+        match provider_checks::run_gates(ctx, input, provider, &identity, counters, attempts) {
+            Some(allow) => allow,
+            None => return PreparationOutcome::Skipped,
+        };
 
     let mut effective_credential = if provider.source_provider_id.is_some() {
         String::new()
@@ -112,8 +110,12 @@ pub(super) async fn prepare_provider(
         match resolve_effective_credential(&input.state, &input.cli_key, provider).await {
             Ok(value) => value,
             Err(err) => {
-                provider_checks::skip_with_reason(attempts, provider_id, &provider_name_base,
-                    &provider_base_url_display, input.started.elapsed().as_millis(),
+                provider_checks::skip_with_reason(
+                    attempts,
+                    provider_id,
+                    &provider_name_base,
+                    &provider_base_url_display,
+                    input.started.elapsed().as_millis(),
                     SkipReason {
                         error_category: "auth",
                         error_code: GatewayErrorCode::InternalError.as_str(),
@@ -132,8 +134,15 @@ pub(super) async fn prepare_provider(
     };
 
     let mut provider_base_url_base = match provider_checks::resolve_base_url(
-        input, provider, provider_id, &provider_name_base, &provider_base_url_display, attempts,
-    ).await {
+        input,
+        provider,
+        provider_id,
+        &provider_name_base,
+        &provider_base_url_display,
+        attempts,
+    )
+    .await
+    {
         Some(url) => url,
         None => return PreparationOutcome::Skipped,
     };
@@ -147,7 +156,12 @@ pub(super) async fn prepare_provider(
     };
 
     let oauth_adapter = match provider_checks::resolve_oauth(
-        input, provider, provider_id, &provider_name_base, &provider_base_url_display, attempts,
+        input,
+        provider,
+        provider_id,
+        &provider_name_base,
+        &provider_base_url_display,
+        attempts,
     ) {
         Some(adapter) => adapter,
         None => return PreparationOutcome::Skipped,
@@ -162,8 +176,12 @@ pub(super) async fn prepare_provider(
     if let Some(adapter) = &oauth_adapter {
         if adapter.provider_type() == "gemini_oauth" {
             match provider_checks::prepare_gemini_oauth(
-                input, &effective_credential, &mut provider_base_url_base,
-            ).await {
+                input,
+                &effective_credential,
+                &mut provider_base_url_base,
+            )
+            .await
+            {
                 Some(prepared) => {
                     upstream_forwarded_path = prepared.forwarded_path;
                     upstream_query = prepared.query;
@@ -172,8 +190,12 @@ pub(super) async fn prepare_provider(
                     gemini_oauth_response_mode = Some(prepared.response_mode);
                 }
                 None => {
-                    provider_checks::skip_with_reason(attempts, provider_id, &provider_name_base,
-                        &provider_base_url_display, input.started.elapsed().as_millis(),
+                    provider_checks::skip_with_reason(
+                        attempts,
+                        provider_id,
+                        &provider_name_base,
+                        &provider_base_url_display,
+                        input.started.elapsed().as_millis(),
                         SkipReason {
                             error_category: "auth",
                             error_code: GatewayErrorCode::InternalError.as_str(),
@@ -192,10 +214,17 @@ pub(super) async fn prepare_provider(
     let mut cx2cc_codex_session_id: Option<String> = None;
     if let Some(source_id) = provider.source_provider_id {
         let outcome = cx2cc_preparation::prepare(cx2cc_preparation::Cx2ccPreparationInput {
-            ctx, input, provider_id, provider_name_base: &provider_name_base,
-            source_id, anthropic_stream_requested, upstream_body_bytes,
-            use_codex_chatgpt_backend, codex_chatgpt_account_id,
-        }).await;
+            ctx,
+            input,
+            provider_id,
+            provider_name_base: &provider_name_base,
+            source_id,
+            anthropic_stream_requested,
+            upstream_body_bytes,
+            use_codex_chatgpt_backend,
+            codex_chatgpt_account_id,
+        })
+        .await;
         match outcome {
             cx2cc_preparation::Cx2ccOutcome::Ready(boxed) => {
                 let result = *boxed;
@@ -212,8 +241,14 @@ pub(super) async fn prepare_provider(
                 codex_chatgpt_account_id = result.codex_chatgpt_account_id;
             }
             cx2cc_preparation::Cx2ccOutcome::Skipped(reason) => {
-                provider_checks::skip_with_reason(attempts, provider_id, &provider_name_base,
-                    &provider_base_url_display, input.started.elapsed().as_millis(), reason);
+                provider_checks::skip_with_reason(
+                    attempts,
+                    provider_id,
+                    &provider_name_base,
+                    &provider_base_url_display,
+                    input.started.elapsed().as_millis(),
+                    reason,
+                );
                 return PreparationOutcome::Skipped;
             }
         }
@@ -237,7 +272,10 @@ pub(super) async fn prepare_provider(
 
     if should_apply_claude_model_mapping(cx2cc_active, &upstream_forwarded_path) {
         claude_model_mapping::apply_if_needed(
-            ctx, provider, provider_ctx, input.requested_model_location,
+            ctx,
+            provider,
+            provider_ctx,
+            input.requested_model_location,
             input.introspection_json.as_ref(),
             claude_model_mapping::UpstreamRequestMut {
                 forwarded_path: &mut upstream_forwarded_path,
@@ -250,7 +288,8 @@ pub(super) async fn prepare_provider(
 
     claude_metadata_user_id_injection::apply_if_needed(
         claude_metadata_user_id_injection::ApplyClaudeMetadataUserIdInjectionInput {
-            ctx, provider_id,
+            ctx,
+            provider_id,
             enabled: input.enable_claude_metadata_user_id_injection,
             session_id: input.session_id.as_deref(),
             base_headers: &input.base_headers,
@@ -262,18 +301,34 @@ pub(super) async fn prepare_provider(
 
     if use_codex_chatgpt_backend {
         maybe_apply_codex_chatgpt_request_compat(
-            &mut upstream_forwarded_path, &mut upstream_body_bytes,
+            &mut upstream_forwarded_path,
+            &mut upstream_body_bytes,
             &mut strip_request_content_encoding,
         );
     }
 
     PreparationOutcome::Ready(Box::new(PreparedProvider {
-        provider_id, provider_name_base, provider_base_url_base, provider_base_url_display,
-        provider_index, session_reuse, effective_credential, provider_max_attempts,
-        oauth_adapter, upstream_forwarded_path, upstream_query, upstream_body_bytes,
-        strip_request_content_encoding, gemini_oauth_response_mode, use_codex_chatgpt_backend,
-        codex_chatgpt_account_id, cx2cc_active, cx2cc_source, cx2cc_codex_session_id,
-        circuit_snapshot, anthropic_stream_requested,
+        provider_id,
+        provider_name_base,
+        provider_base_url_base,
+        provider_base_url_display,
+        provider_index,
+        session_reuse,
+        effective_credential,
+        provider_max_attempts,
+        oauth_adapter,
+        upstream_forwarded_path,
+        upstream_query,
+        upstream_body_bytes,
+        strip_request_content_encoding,
+        gemini_oauth_response_mode,
+        use_codex_chatgpt_backend,
+        codex_chatgpt_account_id,
+        cx2cc_active,
+        cx2cc_source,
+        cx2cc_codex_session_id,
+        circuit_snapshot,
+        anthropic_stream_requested,
         stream_idle_timeout_seconds: provider.stream_idle_timeout_seconds,
     }))
 }

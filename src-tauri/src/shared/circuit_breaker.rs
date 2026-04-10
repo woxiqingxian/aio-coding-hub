@@ -164,8 +164,7 @@ impl CircuitBreaker {
                     }
                 }
                 CircuitState::HalfOpen => {
-                    entry.half_open_success_count =
-                        entry.half_open_success_count.saturating_add(1);
+                    entry.half_open_success_count = entry.half_open_success_count.saturating_add(1);
 
                     if entry.half_open_success_count >= HALF_OPEN_SUCCESS_REQUIRED {
                         let prev = entry.state;
@@ -228,8 +227,7 @@ impl CircuitBreaker {
                     if effective >= cfg.failure_threshold {
                         let prev = entry.state;
                         entry.state = CircuitState::Open;
-                        entry.open_until =
-                            Some(now_unix.saturating_add(cfg.open_duration_secs));
+                        entry.open_until = Some(now_unix.saturating_add(cfg.open_duration_secs));
 
                         let snap = Self::snapshot_from_health(&cfg, entry, now_u64);
                         transition = Some(CircuitTransition {
@@ -291,10 +289,7 @@ impl CircuitBreaker {
         }
     }
 
-    fn persisted_from_health(
-        provider_id: i64,
-        health: &ProviderHealth,
-    ) -> CircuitPersistedState {
+    fn persisted_from_health(provider_id: i64, health: &ProviderHealth) -> CircuitPersistedState {
         CircuitPersistedState {
             provider_id,
             state: health.state,

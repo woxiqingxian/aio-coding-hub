@@ -1,17 +1,5 @@
 //! Usage: Handle upstream non-success responses and reqwest errors inside `failover_loop::run`.
 
-use crate::gateway::proxy::errors::{
-    classify_reqwest_error, classify_upstream_status, error_response,
-};
-use crate::gateway::proxy::failover::{retry_backoff_delay, FailoverDecision};
-use crate::gateway::proxy::http_util::{
-    build_response, has_gzip_content_encoding, has_non_identity_content_encoding,
-    maybe_gunzip_response_body_bytes_with_limit,
-};
-use crate::gateway::proxy::is_claude_count_tokens_request;
-use crate::gateway::proxy::provider_router;
-use crate::gateway::proxy::upstream_client_error_rules;
-use crate::gateway::proxy::{ErrorCategory, GatewayErrorCode};
 use super::attempt_record::{
     record_system_failure_and_decide, record_system_failure_and_decide_no_cooldown,
     RecordSystemFailureArgs,
@@ -28,6 +16,18 @@ use super::{
 use crate::circuit_breaker;
 use crate::gateway::events::decision_chain as dc;
 use crate::gateway::events::FailoverAttempt;
+use crate::gateway::proxy::errors::{
+    classify_reqwest_error, classify_upstream_status, error_response,
+};
+use crate::gateway::proxy::failover::{retry_backoff_delay, FailoverDecision};
+use crate::gateway::proxy::http_util::{
+    build_response, has_gzip_content_encoding, has_non_identity_content_encoding,
+    maybe_gunzip_response_body_bytes_with_limit,
+};
+use crate::gateway::proxy::is_claude_count_tokens_request;
+use crate::gateway::proxy::provider_router;
+use crate::gateway::proxy::upstream_client_error_rules;
+use crate::gateway::proxy::{ErrorCategory, GatewayErrorCode};
 use crate::gateway::response_fixer;
 use crate::gateway::streams::GunzipStream;
 use crate::gateway::util::{now_unix_seconds, strip_hop_headers};

@@ -22,7 +22,11 @@ fn sliding_ttl_refreshes_on_get_bound_provider() {
     // Access at t0 + 400 (> original t0+300 but < refreshed t1+300)
     let t2 = t0 + 400;
     let provider = manager.get_bound_provider("claude", "s1", t2);
-    assert_eq!(provider, Some(42), "binding should still be valid after sliding TTL refresh");
+    assert_eq!(
+        provider,
+        Some(42),
+        "binding should still be valid after sliding TTL refresh"
+    );
 }
 
 #[test]
@@ -35,7 +39,10 @@ fn sliding_ttl_expired_without_access() {
     // No access in between — check after TTL expires
     let t_expired = t0 + 301;
     let provider = manager.get_bound_provider("claude", "s1", t_expired);
-    assert_eq!(provider, None, "binding should expire without sliding refresh");
+    assert_eq!(
+        provider, None,
+        "binding should expire without sliding refresh"
+    );
 }
 
 #[test]
@@ -76,7 +83,11 @@ fn sliding_ttl_refreshes_on_get_bound_sort_mode_id() {
     // Should survive past original expiry (t0 + 300) because of refresh
     let t2 = t0 + 400;
     let mode = manager.get_bound_sort_mode_id("claude", "s1", t2);
-    assert_eq!(mode, Some(Some(7)), "sort_mode binding should survive after sliding refresh");
+    assert_eq!(
+        mode,
+        Some(Some(7)),
+        "sort_mode binding should survive after sliding refresh"
+    );
 }
 
 #[test]

@@ -13,9 +13,7 @@ use crate::gateway::proxy::handler::provider_selection::{
 pub(in crate::gateway::proxy::handler) struct ProviderResolutionMiddleware;
 
 impl ProviderResolutionMiddleware {
-    pub(in crate::gateway::proxy::handler) async fn run(
-        mut ctx: ProxyContext,
-    ) -> MiddlewareAction {
+    pub(in crate::gateway::proxy::handler) async fn run(mut ctx: ProxyContext) -> MiddlewareAction {
         // --- session routing decision ---
         let decision = resolve_session_routing_decision(
             &ctx.headers,

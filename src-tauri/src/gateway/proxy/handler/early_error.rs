@@ -106,10 +106,7 @@ pub(super) fn force_provider_if_requested(
 // Special settings helpers
 // ---------------------------------------------------------------------------
 
-pub(super) fn push_special_setting(
-    special_settings: &SpecialSettings,
-    setting: serde_json::Value,
-) {
+pub(super) fn push_special_setting(special_settings: &SpecialSettings, setting: serde_json::Value) {
     let mut settings = special_settings.lock_or_recover();
     settings.push(setting);
 }

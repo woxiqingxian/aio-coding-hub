@@ -3,8 +3,8 @@
 //! These helpers are used by `provider_iterator::prepare_provider` to validate
 //! and resolve provider configuration before the retry loop begins.
 
-use super::*;
 use super::provider_iterator::{IterationCounters, SkipReason};
+use super::*;
 use crate::gateway::proxy::gemini_oauth::GeminiOAuthResponseMode;
 
 pub(super) fn skip_with_reason(
@@ -144,7 +144,10 @@ pub(super) async fn resolve_base_url(
                 err
             );
             skip_with_reason(
-                attempts, provider_id, provider_name_base, provider_base_url_display,
+                attempts,
+                provider_id,
+                provider_name_base,
+                provider_base_url_display,
                 input.started.elapsed().as_millis(),
                 SkipReason {
                     error_category: "system",
@@ -203,7 +206,10 @@ pub(super) fn resolve_oauth(
                 err_text
             );
             skip_with_reason(
-                attempts, provider_id, provider_name_base, provider_base_url_display,
+                attempts,
+                provider_id,
+                provider_name_base,
+                provider_base_url_display,
                 input.started.elapsed().as_millis(),
                 SkipReason {
                     error_category: "auth",

@@ -4,8 +4,8 @@
 //! - `Continue(ctx)`: pass the (possibly enriched) context to the next middleware.
 //! - `ShortCircuit(Response)`: return a response immediately, skipping remaining middlewares.
 
-pub(super) mod body_reader;
 pub(super) mod billing_header_rectifier;
+pub(super) mod body_reader;
 pub(super) mod cli_proxy_guard;
 pub(super) mod codex_session_completion;
 pub(super) mod model_inference;
@@ -16,8 +16,8 @@ pub(super) mod request_fingerprint;
 pub(super) mod runtime_settings_reader;
 pub(super) mod warmup_interceptor;
 
-pub(super) use body_reader::BodyReaderMiddleware;
 pub(super) use billing_header_rectifier::BillingHeaderRectifierMiddleware;
+pub(super) use body_reader::BodyReaderMiddleware;
 pub(super) use cli_proxy_guard::CliProxyGuardMiddleware;
 pub(super) use codex_session_completion::CodexSessionCompletionMiddleware;
 pub(super) use model_inference::ModelInferenceMiddleware;

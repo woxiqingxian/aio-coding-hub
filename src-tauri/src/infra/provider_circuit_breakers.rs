@@ -242,15 +242,13 @@ pub fn load_all(
             let timestamps_json: String = row
                 .get::<_, String>("failure_timestamps_json")
                 .unwrap_or_else(|_| "[]".to_string());
-            let half_open_success_count: i64 = row
-                .get::<_, i64>("half_open_success_count")
-                .unwrap_or(0);
+            let half_open_success_count: i64 =
+                row.get::<_, i64>("half_open_success_count").unwrap_or(0);
             Ok(circuit_breaker::CircuitPersistedState {
                 provider_id: row.get("provider_id")?,
                 state: circuit_breaker::CircuitState::from_str(&raw_state),
                 failure_timestamps: deserialize_failure_timestamps(&timestamps_json),
-                half_open_success_count: half_open_success_count.max(0).min(u32::MAX as i64)
-                    as u32,
+                half_open_success_count: half_open_success_count.max(0).min(u32::MAX as i64) as u32,
                 open_until,
                 updated_at: row.get("updated_at")?,
             })

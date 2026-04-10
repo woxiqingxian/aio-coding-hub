@@ -83,9 +83,7 @@ pub(super) fn is_gate_only_skipped_attempt(attempt: &FailoverAttempt) -> bool {
     )
 }
 
-pub(super) fn should_finalize_as_all_providers_unavailable(
-    attempts: &[FailoverAttempt],
-) -> bool {
+pub(super) fn should_finalize_as_all_providers_unavailable(attempts: &[FailoverAttempt]) -> bool {
     attempts.is_empty() || attempts.iter().all(is_gate_only_skipped_attempt)
 }
 

@@ -109,8 +109,8 @@ pub(super) async fn run(mut input: RequestContext) -> Response {
 
     let mut abort_guard = input.abort_guard.take();
 
-    let introspection_body = body_for_introspection(&input.base_headers, input.body_bytes.as_ref())
-        .into_owned();
+    let introspection_body =
+        body_for_introspection(&input.base_headers, input.body_bytes.as_ref()).into_owned();
     let ctx = CommonCtx::from(CommonCtxArgs {
         state: &input.state,
         cli_key: &input.cli_key,
@@ -158,8 +158,13 @@ pub(super) async fn run(mut input: RequestContext) -> Response {
         }
 
         let preparation = provider_iterator::prepare_provider(
-            ctx, &input, provider, &mut counters, &mut attempts,
-            &failed_provider_ids, anthropic_stream_requested,
+            ctx,
+            &input,
+            provider,
+            &mut counters,
+            &mut attempts,
+            &failed_provider_ids,
+            anthropic_stream_requested,
         )
         .await;
 
@@ -171,11 +176,16 @@ pub(super) async fn run(mut input: RequestContext) -> Response {
         let mut circuit_snapshot = prepared.circuit_snapshot.clone();
 
         if let Some(resp) = retry_engine::run_retry_loop(
-            ctx, &input, &mut prepared,
+            ctx,
+            &input,
+            &mut prepared,
             LoopState::new(
-                &mut attempts, &mut failed_provider_ids,
-                &mut last_error_category, &mut last_error_code,
-                &mut circuit_snapshot, &mut abort_guard,
+                &mut attempts,
+                &mut failed_provider_ids,
+                &mut last_error_category,
+                &mut last_error_code,
+                &mut circuit_snapshot,
+                &mut abort_guard,
             ),
         )
         .await

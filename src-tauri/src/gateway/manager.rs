@@ -346,10 +346,7 @@ impl GatewayManager {
             .into_iter()
             .map(|provider_id| {
                 if let Some(item) = persisted.get(&provider_id) {
-                    let failure_count = item
-                        .failure_timestamps
-                        .len()
-                        .min(u32::MAX as usize) as u32;
+                    let failure_count = item.failure_timestamps.len().min(u32::MAX as usize) as u32;
                     let expired = item.state == circuit_breaker::CircuitState::Open
                         && item.open_until.map(|t| now_unix >= t).unwrap_or(true);
                     if expired {

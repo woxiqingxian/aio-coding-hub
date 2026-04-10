@@ -4,9 +4,9 @@
 //! provider-specific authentication, and cleaning the request body
 //! before sending upstream.
 
-use super::*;
 use super::attempt_executor::RetryLoopState;
 use super::provider_iterator::PreparedProvider;
+use super::*;
 use crate::gateway::proxy::request_context::RequestContext;
 
 /// Context needed for building a failed-attempt record when OAuth injection fails.
@@ -50,7 +50,14 @@ pub(super) fn inject_auth(
     if prepared.oauth_adapter.is_some() {
         inject_oauth_auth(prepared, input, error_ctx, headers)?;
     } else {
-        inject_standard_auth(ctx, input, prepared, retry_state, error_ctx.retry_index, headers);
+        inject_standard_auth(
+            ctx,
+            input,
+            prepared,
+            retry_state,
+            error_ctx.retry_index,
+            headers,
+        );
     }
 
     if prepared.use_codex_chatgpt_backend {
@@ -64,10 +71,7 @@ pub(super) fn inject_auth(
 }
 
 /// Clean request body (e.g. remove empty text blocks for Claude OAuth).
-pub(super) fn clean_body(
-    input: &RequestContext,
-    prepared: &PreparedProvider,
-) -> Bytes {
+pub(super) fn clean_body(input: &RequestContext, prepared: &PreparedProvider) -> Bytes {
     if input.cli_key == "claude" && prepared.oauth_adapter.is_some() {
         if let Ok(mut json) =
             serde_json::from_slice::<serde_json::Value>(&prepared.upstream_body_bytes)

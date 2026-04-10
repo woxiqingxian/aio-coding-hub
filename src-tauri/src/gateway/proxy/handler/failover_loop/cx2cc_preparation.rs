@@ -4,8 +4,8 @@
 //! via a source provider, including credential resolution, protocol bridge
 //! invocation, base URL override, and Codex session ID completion.
 
-use super::*;
 use super::provider_iterator::SkipReason;
+use super::*;
 use crate::gateway::proxy::protocol_bridge::{self, BridgeContext};
 
 /// All CX2CC-related state produced by preparation.
@@ -73,16 +73,21 @@ pub(super) async fn prepare(args: Cx2ccPreparationInput<'_>) -> Cx2ccOutcome {
             Ok(cred) => cred,
             Err(err) => {
                 let msg = format!(
-                    "[CX2CC] source credential resolution failed: {err} (provider={}, source_id={})",
-                    args.provider_name_base, args.source_id
-                );
+                "[CX2CC] source credential resolution failed: {err} (provider={}, source_id={})",
+                args.provider_name_base, args.source_id
+            );
                 tracing::warn!(
                     trace_id = %args.input.trace_id,
                     provider_id = args.provider_id,
                     source_provider_id = args.source_id,
                     "cx2cc: source provider credential resolution failed: {err}"
                 );
-                emit_gateway_log(&args.input.state.app, "warn", "CX2CC_CREDENTIAL_FAILED", msg);
+                emit_gateway_log(
+                    &args.input.state.app,
+                    "warn",
+                    "CX2CC_CREDENTIAL_FAILED",
+                    msg,
+                );
                 return Cx2ccOutcome::Skipped(SkipReason {
                     error_category: "auth",
                     error_code: GatewayErrorCode::InternalError.as_str(),
@@ -94,10 +99,7 @@ pub(super) async fn prepare(args: Cx2ccPreparationInput<'_>) -> Cx2ccOutcome {
     // Translate request via protocol bridge (IR path).
     let body_val: serde_json::Value =
         serde_json::from_slice(&args.upstream_body_bytes).unwrap_or_default();
-    let requested_model = body_val
-        .get("model")
-        .and_then(|m| m.as_str())
-        .unwrap_or("");
+    let requested_model = body_val.get("model").and_then(|m| m.as_str()).unwrap_or("");
     let bridge_ctx = BridgeContext {
         claude_models: args
             .input

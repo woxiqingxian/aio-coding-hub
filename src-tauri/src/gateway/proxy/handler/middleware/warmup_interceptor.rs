@@ -1,9 +1,7 @@
 //! Middleware: intercepts Anthropic warmup requests and responds locally.
 
 use super::{MiddlewareAction, ProxyContext};
-use crate::gateway::events::{
-    decision_chain as dc, emit_request_start_event, FailoverAttempt,
-};
+use crate::gateway::events::{decision_chain as dc, emit_request_start_event, FailoverAttempt};
 use crate::gateway::proxy::request_end::{
     emit_request_event_and_spawn_request_log, RequestEndArgs, RequestEndDeps,
 };

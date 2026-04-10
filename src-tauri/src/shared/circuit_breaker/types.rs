@@ -123,7 +123,11 @@ impl ProviderHealth {
     /// Count failures within the sliding window.
     pub(super) fn effective_failure_count(&self, now: u64) -> u32 {
         let cutoff = now.saturating_sub(FAILURE_WINDOW_SECS);
-        let count = self.failure_timestamps.iter().filter(|&&ts| ts > cutoff).count();
+        let count = self
+            .failure_timestamps
+            .iter()
+            .filter(|&&ts| ts > cutoff)
+            .count();
         count.min(u32::MAX as usize) as u32
     }
 

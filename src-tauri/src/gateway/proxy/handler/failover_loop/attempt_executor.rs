@@ -3,8 +3,8 @@
 //! Encapsulates URL construction, header assembly, auth injection, body
 //! cleaning, and the upstream send for one retry attempt.
 
-use super::*;
 use super::provider_iterator::PreparedProvider;
+use super::*;
 use crate::gateway::proxy::abort_guard::RequestAbortGuard;
 use crate::gateway::proxy::request_context::RequestContext;
 
@@ -58,20 +58,30 @@ pub(super) async fn execute_attempt(
         Ok(u) => u,
         Err(err) => {
             let attempt_ctx = build_attempt_ctx(
-                attempt_index, retry_index, attempt_started_ms,
-                &circuit_before, prepared,
+                attempt_index,
+                retry_index,
+                attempt_started_ms,
+                &circuit_before,
+                prepared,
             );
             let provider_ctx = build_provider_ctx(prepared);
-            let ctrl = handle_url_build_failure(
-                ctx, input, attempt_ctx, provider_ctx, err, loop_state,
-            ).await;
+            let ctrl =
+                handle_url_build_failure(ctx, input, attempt_ctx, provider_ctx, err, loop_state)
+                    .await;
             return AttemptSendOutcome::UrlBuildFailed(ctrl);
         }
     };
 
     // --- Emit "started" attempt event ---
-    emit_started_event(input, prepared, attempt_index, retry_index,
-        attempt_started_ms, &circuit_before, loop_state.abort_guard);
+    emit_started_event(
+        input,
+        prepared,
+        attempt_index,
+        retry_index,
+        attempt_started_ms,
+        &circuit_before,
+        loop_state.abort_guard,
+    );
 
     // --- Build headers + inject auth ---
     let mut headers = input.base_headers.clone();
@@ -85,9 +95,15 @@ pub(super) async fn execute_attempt(
     );
 
     if let Err(failed_attempt) = attempt_auth::inject_auth(
-        ctx, input, prepared, retry_state,
+        ctx,
+        input,
+        prepared,
+        retry_state,
         &attempt_auth::AuthErrorCtx {
-            attempt_index, retry_index, attempt_started_ms, circuit_before: &circuit_before,
+            attempt_index,
+            retry_index,
+            attempt_started_ms,
+            circuit_before: &circuit_before,
         },
         &mut headers,
     ) {
@@ -98,10 +114,8 @@ pub(super) async fn execute_attempt(
     // --- Clean body + send upstream ---
     let cleaned_body = attempt_auth::clean_body(input, prepared);
 
-    let send_result = send::send_upstream(
-        ctx, input.req_method.clone(), url, headers, cleaned_body,
-    )
-    .await;
+    let send_result =
+        send::send_upstream(ctx, input.req_method.clone(), url, headers, cleaned_body).await;
 
     match send_result {
         send::SendResult::Ok(resp) => AttemptSendOutcome::Response(resp),
@@ -143,15 +157,21 @@ async fn handle_url_build_failure(
     let decision = FailoverDecision::SwitchProvider;
     let outcome = format!(
         "build_target_url_error: category={} code={} decision={} err={err}",
-        ErrorCategory::SystemError.as_str(), error_code, decision.as_str(),
+        ErrorCategory::SystemError.as_str(),
+        error_code,
+        decision.as_str(),
     );
-    record_system_failure_and_decide_no_cooldown(
-        RecordSystemFailureArgs {
-            ctx, provider_ctx, attempt_ctx, loop_state: loop_state.reborrow(),
-            status: None, error_code, decision, outcome,
-            reason: format!("invalid base_url: {err}"),
-        },
-    )
+    record_system_failure_and_decide_no_cooldown(RecordSystemFailureArgs {
+        ctx,
+        provider_ctx,
+        attempt_ctx,
+        loop_state: loop_state.reborrow(),
+        status: None,
+        error_code,
+        decision,
+        outcome,
+        reason: format!("invalid base_url: {err}"),
+    })
     .await
 }
 
@@ -208,7 +228,9 @@ fn emit_started_event(
         decision: None,
         reason: None,
         selection_method: dc::selection_method(
-            prepared.provider_index, retry_index, prepared.session_reuse,
+            prepared.provider_index,
+            retry_index,
+            prepared.session_reuse,
         ),
         reason_code: None,
         attempt_started_ms: Some(attempt_started_ms),

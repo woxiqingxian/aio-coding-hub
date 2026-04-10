@@ -4,9 +4,9 @@
 //! directory processes a `ProxyContext` and either continues to the next step or
 //! short-circuits with a Response.
 
+use super::is_claude_count_tokens_request;
 use super::logging::enqueue_request_log_placeholder;
 use super::request_context::RequestContext;
-use super::is_claude_count_tokens_request;
 
 use crate::gateway::events::emit_request_start_event;
 use crate::gateway::proxy::should_seed_in_progress_request_log;
@@ -31,7 +31,7 @@ use early_error::extract_forced_provider_id;
 use middleware::{
     BillingHeaderRectifierMiddleware, BodyReaderMiddleware, CliProxyGuardMiddleware,
     CodexSessionCompletionMiddleware, MiddlewareAction, ModelInferenceMiddleware,
-    ProbeInterceptorMiddleware, ProxyContext, ProviderResolutionMiddleware,
+    ProbeInterceptorMiddleware, ProviderResolutionMiddleware, ProxyContext,
     RecursionGuardMiddleware, RequestFingerprintMiddleware, RuntimeSettingsMiddleware,
     WarmupInterceptorMiddleware,
 };
@@ -624,11 +624,7 @@ mod tests {
         let mut providers = vec![provider(1), provider(2), provider(3)];
         let special_settings = super::new_special_settings();
 
-        super::early_error::force_provider_if_requested(
-            &mut providers,
-            Some(2),
-            &special_settings,
-        );
+        super::early_error::force_provider_if_requested(&mut providers, Some(2), &special_settings);
 
         assert_eq!(provider_ids(&providers), vec![2]);
     }

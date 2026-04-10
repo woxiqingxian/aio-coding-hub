@@ -1,8 +1,8 @@
 //! Usage: Handle Claude thinking rectifiers (signature/budget) 400 path inside `failover_loop::run`.
 
+use super::*;
 use crate::gateway::proxy::provider_router;
 use crate::gateway::proxy::upstream_client_error_rules;
-use super::*;
 use crate::gateway::thinking_budget_rectifier;
 use crate::shared::mutex_ext::MutexExt;
 

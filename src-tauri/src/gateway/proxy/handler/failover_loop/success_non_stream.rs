@@ -1,7 +1,7 @@
 //! Usage: Handle successful non-SSE upstream responses inside `failover_loop::run`.
 
-use crate::gateway::proxy::{gemini_oauth, protocol_bridge, provider_router, GatewayErrorCode};
 use super::*;
+use crate::gateway::proxy::{gemini_oauth, protocol_bridge, provider_router, GatewayErrorCode};
 use crate::shared::mutex_ext::MutexExt;
 
 fn buffer_cx2cc_event_stream_as_json(

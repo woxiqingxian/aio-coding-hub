@@ -4,10 +4,10 @@
 //! fallback (401/403), OAuth 401 reactive refresh, and non-success upstream
 //! error delegation.
 
-use super::*;
 use super::attempt_executor::RetryLoopState;
 use super::provider_iterator::PreparedProvider;
 use super::retry_engine::AttemptIndices;
+use super::*;
 use crate::gateway::proxy::request_context::RequestContext;
 
 /// Route an HTTP response from upstream to the appropriate handler.
@@ -41,7 +41,13 @@ pub(super) async fn route_response(
     );
 
     if prepared.cx2cc_active {
-        emit_cx2cc_upstream_log(input, prepared, status, response_content_type, &response_headers);
+        emit_cx2cc_upstream_log(
+            input,
+            prepared,
+            status,
+            response_content_type,
+            &response_headers,
+        );
     }
 
     let attempt_started_ms = input.started.elapsed().as_millis();
@@ -71,14 +77,24 @@ pub(super) async fn route_response(
             && is_event_stream(&response_headers)
         {
             return success_event_stream::handle_success_event_stream(
-                ctx, provider_ctx, attempt_ctx, loop_state.reborrow(),
-                resp, status, response_headers,
+                ctx,
+                provider_ctx,
+                attempt_ctx,
+                loop_state.reborrow(),
+                resp,
+                status,
+                response_headers,
             )
             .await;
         }
         return success_non_stream::handle_success_non_stream(
-            ctx, provider_ctx, attempt_ctx, loop_state.reborrow(),
-            resp, status, response_headers,
+            ctx,
+            provider_ctx,
+            attempt_ctx,
+            loop_state.reborrow(),
+            resp,
+            status,
+            response_headers,
         )
         .await;
     }
@@ -117,8 +133,11 @@ pub(super) async fn route_response(
     let attempt_started = Instant::now();
     let circuit_before = prepared.circuit_snapshot.clone();
     let attempt_ctx = AttemptCtx {
-        attempt_index: indices.attempt_index, retry_index: indices.retry_index,
-        attempt_started_ms, attempt_started, circuit_before: &circuit_before,
+        attempt_index: indices.attempt_index,
+        retry_index: indices.retry_index,
+        attempt_started_ms,
+        attempt_started,
+        circuit_before: &circuit_before,
         gemini_oauth_response_mode: prepared.gemini_oauth_response_mode,
         cx2cc_active: prepared.cx2cc_active,
         anthropic_stream_requested: prepared.anthropic_stream_requested,

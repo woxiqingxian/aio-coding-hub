@@ -4,9 +4,9 @@
 //! continue retrying the same provider, switch to the next provider, or
 //! return a final response to the client.
 
-use super::*;
 use super::attempt_executor::{AttemptSendOutcome, RetryLoopState};
 use super::provider_iterator::PreparedProvider;
+use super::*;
 use crate::gateway::proxy::request_context::RequestContext;
 
 #[derive(Clone, Copy)]
@@ -32,15 +32,27 @@ pub(super) async fn run_retry_loop(
         let attempt_index = loop_state.attempts.len().saturating_add(1) as u32;
 
         let send_outcome = attempt_executor::execute_attempt(
-            ctx, input, prepared, &mut retry_state,
-            retry_index, attempt_index, &mut loop_state,
+            ctx,
+            input,
+            prepared,
+            &mut retry_state,
+            retry_index,
+            attempt_index,
+            &mut loop_state,
         )
         .await;
 
         let ctrl = dispatch_outcome(
-            ctx, input, prepared, &mut retry_state,
-            AttemptIndices { retry_index, attempt_index },
-            send_outcome, &mut loop_state,
+            ctx,
+            input,
+            prepared,
+            &mut retry_state,
+            AttemptIndices {
+                retry_index,
+                attempt_index,
+            },
+            send_outcome,
+            &mut loop_state,
         )
         .await;
 
@@ -70,23 +82,31 @@ async fn dispatch_outcome(
         AttemptSendOutcome::OAuthInjectFailed => LoopControl::BreakRetry,
         AttemptSendOutcome::Response(resp) => {
             response_router::route_response(
-                ctx, input, prepared, retry_state,
-                indices, resp, loop_state,
+                ctx,
+                input,
+                prepared,
+                retry_state,
+                indices,
+                resp,
+                loop_state,
             )
             .await
         }
         AttemptSendOutcome::Timeout => {
             let (attempt_ctx, provider_ctx) =
                 build_error_contexts(input, prepared, indices.attempt_index, indices.retry_index);
-            send_timeout::handle_timeout(
-                ctx, provider_ctx, attempt_ctx, loop_state.reborrow(),
-            ).await
+            send_timeout::handle_timeout(ctx, provider_ctx, attempt_ctx, loop_state.reborrow())
+                .await
         }
         AttemptSendOutcome::ReqwestError(err) => {
             let (attempt_ctx, provider_ctx) =
                 build_error_contexts(input, prepared, indices.attempt_index, indices.retry_index);
             upstream_error::handle_reqwest_error(
-                ctx, provider_ctx, attempt_ctx, loop_state.reborrow(), err,
+                ctx,
+                provider_ctx,
+                attempt_ctx,
+                loop_state.reborrow(),
+                err,
             )
             .await
         }

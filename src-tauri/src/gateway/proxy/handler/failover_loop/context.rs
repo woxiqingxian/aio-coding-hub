@@ -1,11 +1,11 @@
 //! Usage: Shared context types for `failover_loop` internal submodules.
 
-use crate::gateway::proxy::abort_guard::RequestAbortGuard;
-use crate::gateway::proxy::gemini_oauth;
 use crate::circuit_breaker;
 use crate::gateway::events::FailoverAttempt;
 use crate::gateway::manager::GatewayAppState;
+use crate::gateway::proxy::abort_guard::RequestAbortGuard;
 use crate::gateway::proxy::cx2cc::settings::Cx2ccSettings;
+use crate::gateway::proxy::gemini_oauth;
 use crate::gateway::response_fixer;
 use crate::gateway::streams::StreamFinalizeCtx;
 use axum::response::Response;
