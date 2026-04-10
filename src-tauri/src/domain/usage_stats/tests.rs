@@ -11,7 +11,8 @@ fn setup_conn() -> Connection {
 	CREATE TABLE providers (
 	  id INTEGER PRIMARY KEY,
 	  name TEXT NOT NULL,
-	  source_provider_id INTEGER
+	  source_provider_id INTEGER,
+	  bridge_type TEXT
 	);
 
 	CREATE TABLE request_logs (
