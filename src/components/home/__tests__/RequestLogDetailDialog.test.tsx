@@ -175,6 +175,7 @@ describe("home/RequestLogDetailDialog", () => {
       selectedLog: createSelectedLog({
         status: null,
         error_code: null,
+        created_at: Math.floor(Date.now() / 1000),
         duration_ms: undefined,
         ttfb_ms: null,
         input_tokens: null,
@@ -331,6 +332,7 @@ describe("home/RequestLogDetailDialog", () => {
       selectedLog: createSelectedLog({
         status: null,
         error_code: null,
+        created_at: Math.floor(Date.now() / 1000),
         duration_ms: 0,
         final_provider_id: 0,
         final_provider_name: "Unknown",
