@@ -708,4 +708,48 @@ INSERT INTO providers (id, cost_multiplier, source_provider_id) VALUES (12, 1.2,
 
         assert_eq!(multiplier, 1.8);
     }
+
+    #[test]
+    fn effective_cost_multiplier_falls_back_when_source_deleted() {
+        let conn = Connection::open_in_memory().expect("open memory db");
+        conn.execute_batch(
+            r#"
+CREATE TABLE providers (
+  id INTEGER PRIMARY KEY,
+  cost_multiplier REAL NOT NULL DEFAULT 1.0,
+  source_provider_id INTEGER
+);
+INSERT INTO providers (id, cost_multiplier, source_provider_id) VALUES (12, 1.2, 999);
+            "#,
+        )
+        .expect("seed providers");
+
+        let multiplier: f64 = conn
+            .query_row(EFFECTIVE_COST_MULTIPLIER_SQL, params![12], |row| row.get(0))
+            .expect("query multiplier");
+
+        assert_eq!(multiplier, 1.2);
+    }
+
+    #[test]
+    fn effective_cost_multiplier_returns_own_when_no_source() {
+        let conn = Connection::open_in_memory().expect("open memory db");
+        conn.execute_batch(
+            r#"
+CREATE TABLE providers (
+  id INTEGER PRIMARY KEY,
+  cost_multiplier REAL NOT NULL DEFAULT 1.0,
+  source_provider_id INTEGER
+);
+INSERT INTO providers (id, cost_multiplier, source_provider_id) VALUES (5, 2.5, NULL);
+            "#,
+        )
+        .expect("seed providers");
+
+        let multiplier: f64 = conn
+            .query_row(EFFECTIVE_COST_MULTIPLIER_SQL, params![5], |row| row.get(0))
+            .expect("query multiplier");
+
+        assert_eq!(multiplier, 2.5);
+    }
 }

@@ -685,6 +685,16 @@ pub fn upsert(
 
     let requested_auth_mode = auth_mode.unwrap_or(ProviderAuthMode::ApiKey);
     let is_oauth = requested_auth_mode == ProviderAuthMode::Oauth;
+
+    if let Some(ref bt) = bridge_type {
+        if bt != CX2CC_BRIDGE_TYPE {
+            return Err(
+                format!("SEC_INVALID_INPUT: unsupported bridge_type: {bt}")
+                    .into(),
+            );
+        }
+    }
+
     let is_cx2cc = is_cx2cc_bridge(source_provider_id, bridge_type.as_deref());
     let bridge_type = if is_cx2cc {
         Some(CX2CC_BRIDGE_TYPE.to_string())

@@ -375,7 +375,7 @@ export function ProviderEditorDialog(props: ProviderEditorDialogProps) {
     const inheritedMultiplier = isCodexGatewaySource
       ? "0"
       : String(selectedCx2ccSourceProvider?.cost_multiplier ?? 1.0);
-    if (costMultiplierValue === inheritedMultiplier) return;
+    if (Number(costMultiplierValue) === Number(inheritedMultiplier)) return;
     setValue("cost_multiplier", inheritedMultiplier, {
       shouldDirty: true,
       shouldTouch: false,

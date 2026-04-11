@@ -532,6 +532,31 @@ describe("pages/providers/ProviderEditorDialog", () => {
     expect((dialog.getByPlaceholderText("1.0") as HTMLInputElement).value).toBe("1");
   });
 
+  it("shows toast when saving cx2cc without selecting source", async () => {
+    render(
+      <ProviderEditorDialog
+        mode="create"
+        open={true}
+        cliKey="claude"
+        onSaved={vi.fn()}
+        onOpenChange={vi.fn()}
+      />
+    );
+
+    const dialog = within(screen.getByRole("dialog"));
+    fireEvent.click(dialog.getByRole("tab", { name: "CX2CC 转译" }));
+    fireEvent.change(dialog.getByPlaceholderText("default"), {
+      target: { value: "Empty Source" },
+    });
+
+    fireEvent.click(dialog.getByRole("button", { name: "保存" }));
+
+    await waitFor(() =>
+      expect(vi.mocked(toast)).toHaveBeenCalledWith("请选择源 Codex 来源")
+    );
+    expect(vi.mocked(providerUpsert)).not.toHaveBeenCalled();
+  });
+
   it("syncs haiku sonnet opus with main model by default", () => {
     render(
       <ProviderEditorDialog
