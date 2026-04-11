@@ -688,10 +688,7 @@ pub fn upsert(
 
     if let Some(ref bt) = bridge_type {
         if bt != CX2CC_BRIDGE_TYPE {
-            return Err(
-                format!("SEC_INVALID_INPUT: unsupported bridge_type: {bt}")
-                    .into(),
-            );
+            return Err(format!("SEC_INVALID_INPUT: unsupported bridge_type: {bt}").into());
         }
     }
 
